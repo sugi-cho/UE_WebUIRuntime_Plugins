@@ -1,0 +1,14 @@
+# Unreal generated files
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# IDE files
+.vs/
+*.sln
+*.suo
+*.user
+*.opensdf
+*.VC.db
+

@@ -1,0 +1,19 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "Web UI Runtime",
+	"Description": "Runtime Web UI controls for Actor and Component properties.",
+	"Category": "Web UI",
+	"CreatedBy": "sugi-cho",
+	"EnabledByDefault": false,
+	"CanContainContent": false,
+	"Modules": [
+		{
+			"Name": "WebUIRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
+
