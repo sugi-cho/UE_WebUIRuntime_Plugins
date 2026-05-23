@@ -11,6 +11,10 @@ class WEBUI_NDI_API UWebUINDIComponent : public UWebUIComponentBase
 
 public:
 	UWebUINDIComponent();
+	virtual void BeginPlay() override;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
+	void RefreshNDISources();
 
 	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
 	void SetAvailableNDISources(const TArray<FString>& Sources);
@@ -27,11 +31,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
 	FString SelectedNDISource;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")
 	bool bAutoRefreshSources = false;
+
+protected:
+	virtual void HandleWebUIButtonClicked(FName ButtonId) override;
 
 private:
 	UPROPERTY(VisibleAnywhere, Category="WebUI|NDI")
 	TArray<FString> AvailableNDISources;
-};
 
+	void SyncWebUIButtonList();
+};

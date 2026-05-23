@@ -32,6 +32,9 @@ public:
 	void NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value);
 	void NotifyWebUIButtonClicked(FName ButtonId);
 
+protected:
+	virtual void HandleWebUIButtonClicked(FName ButtonId);
+
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI", DisplayName="OnWebUIPropertyChanged")
 	void K2_OnWebUIPropertyChanged(FName PropertyName);
 
@@ -60,4 +63,3 @@ private:
 	UPROPERTY(EditAnywhere, Category="WebUI")
 	TArray<FName> WebUIButtons;
 };
-

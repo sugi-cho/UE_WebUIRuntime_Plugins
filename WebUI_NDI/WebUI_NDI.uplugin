@@ -21,10 +21,8 @@
 			"Enabled": true
 		},
 		{
-			"Name": "NDIIO",
-			"Enabled": false,
-			"Optional": true
+			"Name": "NDIIOPlugin",
+			"Enabled": true
 		}
 	]
 }
-

@@ -12,9 +12,9 @@ public class WebUI_NDI : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"WebUIRuntime"
+				"WebUIRuntime",
+				"NDIIO"
 			}
 		);
 	}
 }
-

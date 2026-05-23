@@ -12,7 +12,8 @@ public class WebUIRuntime : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"Json"
+				"Json",
+				"DeveloperSettings"
 			}
 		);
 
@@ -25,4 +26,3 @@ public class WebUIRuntime : ModuleRules
 		);
 	}
 }
-

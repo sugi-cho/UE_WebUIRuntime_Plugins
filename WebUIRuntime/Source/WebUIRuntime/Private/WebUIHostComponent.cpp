@@ -1,6 +1,7 @@
 #include "WebUIHostComponent.h"
 
 #include "WebUIRuntimeSubsystem.h"
+#include "WebUIRuntimeSettings.h"
 
 UWebUIHostComponent::UWebUIHostComponent()
 {
@@ -21,7 +22,7 @@ void UWebUIHostComponent::BeginPlay()
 		Runtime->RegisterHost(this);
 		if (bAutoStartServer)
 		{
-			Runtime->StartServer(Port);
+			Runtime->StartServerFromSettings();
 		}
 	}
 }
@@ -41,7 +42,7 @@ bool UWebUIHostComponent::StartWebUIServer()
 	if (UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem())
 	{
 		Runtime->RegisterHost(this);
-		return Runtime->StartServer(Port);
+		return Runtime->StartServerFromSettings();
 	}
 	return false;
 }
@@ -65,7 +66,7 @@ FString UWebUIHostComponent::GetWebUIId() const
 
 int32 UWebUIHostComponent::GetWebUIPort() const
 {
-	return Port;
+	return GetDefault<UWebUIRuntimeSettings>()->Port;
 }
 
 UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const
@@ -73,4 +74,3 @@ UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const
 	const UWorld* World = GetWorld();
 	return World ? World->GetSubsystem<UWebUIRuntimeSubsystem>() : nullptr;
 }
-

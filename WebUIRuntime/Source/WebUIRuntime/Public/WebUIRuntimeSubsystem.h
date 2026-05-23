@@ -25,7 +25,7 @@ public:
 	void UnregisterHost(UWebUIHostComponent* Host);
 
 	UFUNCTION(BlueprintCallable, Category="WebUI")
-	bool StartServer(int32 Port = 8765);
+	bool StartServerFromSettings();
 
 	UFUNCTION(BlueprintCallable, Category="WebUI")
 	void StopServer();
@@ -37,6 +37,7 @@ public:
 	int32 GetServerPort() const;
 
 private:
+	bool StartServer(int32 Port);
 	bool HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleProperty(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);

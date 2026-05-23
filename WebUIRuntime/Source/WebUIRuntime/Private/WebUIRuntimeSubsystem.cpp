@@ -12,6 +12,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "WebUIComponentBase.h"
 #include "WebUIHostComponent.h"
+#include "WebUIRuntimeSettings.h"
 #include "WebUIRuntime.h"
 
 namespace
@@ -28,11 +29,19 @@ namespace
 <title>UE WebUI Runtime</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:24px;background:#101216;color:#e9edf2}
-section{border:1px solid #2d3440;border-radius:8px;padding:16px;margin:16px 0;background:#171b22}
+h1{margin:0 0 16px}
+.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 20px}
+.tab{border:1px solid #3d4654;background:#0d1015;color:#e9edf2;padding:8px 12px;border-radius:999px;cursor:pointer}
+.tab.active{background:#233247;border-color:#5b7898}
+.panel{display:none;border:1px solid #2d3440;border-radius:8px;padding:16px;margin:16px 0;background:#171b22}
+.panel.active{display:block}
+.host-meta{opacity:.78;margin-top:4px}
+.component{border-top:1px solid #2d3440;padding-top:12px;margin-top:12px}
 label{display:grid;grid-template-columns:180px minmax(180px,1fr);gap:12px;align-items:center;margin:10px 0}
 input,button{font:inherit;padding:8px;border-radius:6px;border:1px solid #3d4654;background:#0d1015;color:#e9edf2}
 button{cursor:pointer;background:#233247}
 .row{margin:8px 0}
+.empty{opacity:.75;padding:16px 0}
 </style>
 </head>
 <body>
@@ -48,41 +57,78 @@ function makeInput(p){
  if(p.type==='float'||p.type==='int32'){el.type='number'; if(p.type==='float') el.step='0.01';}
  return el;
 }
+function renderComponent(host,c){
+ const cs=document.createElement('section');
+ cs.className='component';
+ cs.innerHTML=`<h3>${c.name}</h3>`;
+ for(const p of c.properties){
+  const label=document.createElement('label');
+  const input=makeInput(p);
+  input.onchange=async()=>{
+   let value=input.type==='checkbox'?input.checked:input.value;
+   if(p.type==='float') value=parseFloat(value);
+   if(p.type==='int32') value=parseInt(value,10);
+   if(['vector','rotator','linearColor'].includes(p.type)) value=JSON.parse(input.value);
+   await api('/api/webui/property',{webUIId:host.webUIId,componentId:c.componentId,propertyName:p.name,value});
+  };
+  label.append(p.name,input);
+  cs.append(label);
+ }
+ for(const b of c.buttons){
+ const row=document.createElement('div');
+  row.className='row';
+  const btn=document.createElement('button');
+  btn.textContent=b.id;
+  btn.onclick=async()=>{await api('/api/webui/button',{webUIId:host.webUIId,componentId:c.componentId,buttonId:b.id}); await load();};
+  row.append(btn);
+  cs.append(row);
+ }
+ return cs;
+}
 async function load(){
  const schema=await (await fetch('/api/webui/schema')).json();
  app.innerHTML='';
- for(const host of schema.hosts){
-  const s=document.createElement('section');
-  s.innerHTML=`<h2>${host.actorName}</h2><div>${host.webUIId}</div>`;
-  for(const c of host.components){
-   const cs=document.createElement('section');
-   cs.innerHTML=`<h3>${c.name}</h3>`;
-   for(const p of c.properties){
-    const label=document.createElement('label');
-    const input=makeInput(p);
-    input.onchange=async()=>{
-     let value=input.type==='checkbox'?input.checked:input.value;
-     if(p.type==='float') value=parseFloat(value);
-     if(p.type==='int32') value=parseInt(value,10);
-     if(['vector','rotator','linearColor'].includes(p.type)) value=JSON.parse(input.value);
-     await api('/api/webui/property',{webUIId:host.webUIId,componentId:c.componentId,propertyName:p.name,value});
-    };
-    label.append(p.name,input);
-    cs.append(label);
-   }
-   for(const b of c.buttons){
-    const row=document.createElement('div');
-    row.className='row';
-    const btn=document.createElement('button');
-    btn.textContent=b.id;
-    btn.onclick=()=>api('/api/webui/button',{webUIId:host.webUIId,componentId:c.componentId,buttonId:b.id});
-    row.append(btn);
-    cs.append(row);
-   }
-   s.append(cs);
-  }
-  app.append(s);
+ const hosts=[...(schema.hosts||[])].sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
+ if(!hosts.length){
+  const empty=document.createElement('div');
+  empty.className='empty';
+  empty.textContent='No WebUIHostComponent was found.';
+  app.append(empty);
+  return;
  }
+ const tabs=document.createElement('div');
+ tabs.className='tabs';
+ const panels=document.createElement('div');
+ let activeTabId='';
+ const setActive=(webUIId)=>{
+  activeTabId=webUIId;
+  for(const tab of tabs.querySelectorAll('[data-webui-id]')){
+   tab.classList.toggle('active',tab.dataset.webuiId===webUIId);
+  }
+  for(const panel of panels.querySelectorAll('[data-webui-panel]')){
+   panel.classList.toggle('active',panel.dataset.webuiPanel===webUIId);
+  }
+ };
+ for(const host of hosts){
+  const tab=document.createElement('button');
+  tab.className='tab';
+  tab.type='button';
+  tab.dataset.webuiId=host.webUIId;
+  tab.textContent=host.webUIId;
+  tab.onclick=()=>setActive(host.webUIId);
+  tabs.append(tab);
+
+  const panel=document.createElement('section');
+  panel.className='panel';
+  panel.dataset.webuiPanel=host.webUIId;
+  panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.actorName}</div>`;
+  for(const c of host.components||[]){
+   panel.append(renderComponent(host,c));
+  }
+  panels.append(panel);
+ }
+ app.append(tabs,panels);
+ setActive(hosts[0].webUIId);
 }
 load();
 </script>
@@ -102,6 +148,11 @@ load();
 bool UWebUIRuntimeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
 	return true;
+}
+
+bool UWebUIRuntimeSubsystem::StartServerFromSettings()
+{
+	return StartServer(GetDefault<UWebUIRuntimeSettings>()->Port);
 }
 
 void UWebUIRuntimeSubsystem::Deinitialize()
@@ -631,4 +682,3 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::ParseRequestJson(const FHttpServ
 	}
 	return BodyObject;
 }
-

@@ -17,28 +17,24 @@ public:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	UFUNCTION(BlueprintCallable, Category="WebUI")
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	bool StartWebUIServer();
 
-	UFUNCTION(BlueprintCallable, Category="WebUI")
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	void StopWebUIServer();
 
-	UFUNCTION(BlueprintPure, Category="WebUI")
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	FString GetWebUIId() const;
 
-	UFUNCTION(BlueprintPure, Category="WebUI")
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	int32 GetWebUIPort() const;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
 	bool bAutoStartServer = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
 	FString WebUIId;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI", meta=(ClampMin="1", ClampMax="65535"))
-	int32 Port = 8765;
 
 private:
 	UWebUIRuntimeSubsystem* GetRuntimeSubsystem() const;
 };
-
