@@ -32,18 +32,31 @@
 - ポートは個別設定ではなく、Project Settings の 1 設定を使います。
 - `Allow Remote Access` を有効にすると、HTTPServer の bind を `any` にして LAN 内から見えるようにします。
 
+## `WebUIHostActor` について
+
+- `WebUIHostComponent` を内包した Actor です。
+- まずは `WebUIHostActor` を置く運用を推奨します。
+- Actor 側の `WebUIId` / `Description` / `bAutoStartServer` を使い、内部で `WebUIHostComponent` を同期します。
+- 既存 Actor に後付けしたい場合は、従来どおり `WebUIHostComponent` 単体でも使えます。
+- ボタンは `WebUIHostComponent` 側を上段コントロールとして使います。
+
 ## `WebUIComponent` について
 
 - 実際の UI 要素は `WebUIComponentBase` か、その派生クラスに置きます。
 - `WebUIComponentBase` はそのまま使ってもよいですし、独自の Component を作って継承しても使えます。
 - たとえば NDI 用の `WebUINDIComponent` のように、用途ごとに派生 Component を追加できます。
 - `WebUIHostComponent` を持つ Actor には、Actor 自身の `WebUI` 変数も上段に表示され、その下に Component ごとのセクションが並びます。
+- `WebUIHostComponent` のボタンは、Actor セクション内の共通コントロールとして表示されます。
 
 ## Property を WebUI に出す方法
 
 1. 対象の `UPROPERTY` を `Category="WebUI"` にします。
 2. もしくは `meta=(WebUI)` を付けます。
-3. 対応型の値だけが WebUI に出ます。
+3. UE の Details 上で `Web UI` に見えるカテゴリも同義として扱います。
+4. 対応型の値だけが WebUI に出ます。
+5. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
+6. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
+7. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
 
 ```cpp
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
@@ -58,7 +71,8 @@ WebUI 上で値を変更すると、UE 側の変数が更新され、その後 `
 ## Button の作り方
 
 1. `WebUIComponentBase` か派生 Component で `RegisterWebUIButton("ButtonName")` を呼びます。
-2. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
+2. `WebUIHostActor` から呼んだ場合も、内部の `WebUIHostComponent` のボタンとして扱われます。
+3. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
 
 ```cpp
 RegisterWebUIButton(TEXT("Apply"));
