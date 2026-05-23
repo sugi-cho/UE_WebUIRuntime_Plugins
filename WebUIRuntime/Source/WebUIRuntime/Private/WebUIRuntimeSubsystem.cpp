@@ -13,6 +13,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "Serialization/JsonSerializer.h"
 #include "WebUIComponentBase.h"
+#include "WebUIHostActor.h"
 #include "WebUIHostComponent.h"
 #include "WebUIRuntimeSettings.h"
 #include "WebUIRuntime.h"
@@ -40,8 +41,22 @@ h1{margin:0 0 16px}
 .panel.active{display:block}
 .host-meta{opacity:.78;margin-top:4px}
 .component{border-top:1px solid #2d3440;padding-top:12px;margin-top:12px}
-label{display:grid;grid-template-columns:180px minmax(180px,1fr);gap:12px;align-items:center;margin:10px 0}
-input,button{font:inherit;padding:8px;border-radius:6px;border:1px solid #3d4654;background:#0d1015;color:#e9edf2}
+label.property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
+.property-name{padding-top:2px;min-width:0}
+.property-control{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-start;min-width:0;width:100%}
+input,button,select{font:inherit;padding:8px;border-radius:6px;border:1px solid #3d4654;background:#0d1015;color:#e9edf2;box-sizing:border-box}
+input[type="text"],input[type="number"],select{width:100%;min-width:0}
+input[type="range"]{flex:1 1 240px;min-width:180px;padding:8px 0}
+.numeric-field{width:120px}
+.vector-group,.rotator-group,.color-group,.linear-color-group{display:grid;width:100%;align-items:center}
+.vector-group,.rotator-group{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.vector-group input,.rotator-group input{width:100%;min-width:0}
+.color-group{grid-template-columns:1fr}
+.linear-color-group{grid-template-columns:140px minmax(0,1fr)}
+.color-swatch,.linear-color-swatch{padding:8px;border-radius:6px;background:#0d1015}
+.alpha-field{width:90px}
+.checkbox-field{margin-left:0}
+.range-field{flex:1 1 240px}
 .button-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 button{cursor:pointer;background:#233247}
 button.webui-button{min-width:120px;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease}
@@ -58,38 +73,285 @@ button.webui-button:disabled{opacity:.72;cursor:default}
 const app=document.getElementById('app');
 let currentWebUIId='';
 async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
-function makeInput(p){
- const el=document.createElement('input');
- el.value=typeof p.value==='object'?JSON.stringify(p.value):p.value ?? '';
- if(p.type==='bool'){el.type='checkbox';el.checked=!!p.value;}
- if(p.type==='float'||p.type==='int32'){el.type='number'; if(p.type==='float') el.step='0.01';}
- return el;
+function numberOrNull(v){return typeof v==='number'&&Number.isFinite(v)?v:null;}
+function resolveNumericBounds(p){
+ const bounds=[
+  ['uiMin','uiMax'],
+  ['sliderMin','sliderMax'],
+  ['clampMin','clampMax']
+ ];
+ for(const [minKey,maxKey] of bounds){
+  const min=numberOrNull(p[minKey]);
+  const max=numberOrNull(p[maxKey]);
+  if(min!==null&&max!==null){return {min,max};}
+ }
+ return {min:null,max:null};
+}
+function resolveNumericStep(p){
+ const step=numberOrNull(p.step);
+ return step!==null?step:(p.type==='int32'?1:0.01);
+}
+function createRow(p){
+ const label=document.createElement('label');
+ label.className='property-row';
+ const name=document.createElement('div');
+ name.className='property-name';
+ name.textContent=p.name;
+ const control=document.createElement('div');
+ control.className='property-control';
+ label.append(name,control);
+ return {label,control};
+}
+function commitProperty(host,ownerType,componentId,p,value){
+ return api('/api/webui/property',{webUIId:host.webUIId,ownerType,componentId,propertyName:p.name,value});
+}
+function renderBoolProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const input=document.createElement('input');
+ input.type='checkbox';
+ input.checked=!!p.value;
+ input.className='checkbox-field';
+ input.onchange=()=>commitProperty(host,ownerType,componentId,p,input.checked);
+ control.append(input);
+ return label;
+}
+function renderStringProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const input=document.createElement('input');
+ input.type='text';
+ input.value=p.value ?? '';
+ input.onchange=()=>commitProperty(host,ownerType,componentId,p,input.value);
+ control.append(input);
+ return label;
+}
+function renderNumericProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const current=numberOrNull(p.value) ?? 0;
+ const {min,max}=resolveNumericBounds(p);
+ const step=resolveNumericStep(p);
+ if(min!==null&&max!==null){
+  const range=document.createElement('input');
+  range.type='range';
+  range.min=String(min);
+  range.max=String(max);
+  range.step=String(step);
+  range.value=String(current);
+  range.className='range-field';
+  const number=document.createElement('input');
+  number.type='number';
+  number.min=String(min);
+  number.max=String(max);
+  number.step=String(step);
+  number.value=String(current);
+  number.className='numeric-field';
+  const sync=(value,send)=>{
+   const next=String(value);
+   range.value=next;
+   number.value=next;
+   if(send){commitProperty(host,ownerType,componentId,p,p.type==='int32'?parseInt(next,10):parseFloat(next));}
+  };
+  range.oninput=()=>sync(range.value,false);
+  range.onchange=()=>sync(range.value,true);
+  number.onchange=()=>sync(number.value,true);
+  control.append(range,number);
+  return label;
+ }
+ const input=document.createElement('input');
+ input.type='number';
+ if(min!==null) input.min=String(min);
+ if(max!==null) input.max=String(max);
+ input.step=String(step);
+ input.value=String(current);
+ input.className='numeric-field';
+ input.onchange=()=>commitProperty(host,ownerType,componentId,p,p.type==='int32'?parseInt(input.value,10):parseFloat(input.value));
+ control.append(input);
+ return label;
+}
+)HTML")
+TEXT(R"HTML(
+function renderEnumProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const select=document.createElement('select');
+ for(const option of p.options||[]){
+  const opt=document.createElement('option');
+  opt.value=option.value;
+  opt.textContent=option.label||option.value;
+  if(option.value===p.value){opt.selected=true;}
+  select.append(opt);
+ }
+ select.onchange=()=>commitProperty(host,ownerType,componentId,p,select.value);
+ control.append(select);
+ return label;
+}
+function makeNumberInput(value,placeholder){
+ const input=document.createElement('input');
+ input.type='number';
+ input.className='numeric-field';
+ input.value=String(value);
+ if(placeholder){input.placeholder=placeholder;}
+ return input;
+}
+function renderVectorProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const value=p.value||{};
+ const fields=[['x','X'],['y','Y'],['z','Z']];
+ const group=document.createElement('div');
+ group.className='vector-group';
+ const inputs={};
+ for(const [key,placeholder] of fields){
+  const input=makeNumberInput(numberOrNull(value[key]) ?? 0,placeholder);
+  inputs[key]=input;
+  group.append(input);
+ }
+ const commit=()=>commitProperty(host,ownerType,componentId,p,{x:parseFloat(inputs.x.value),y:parseFloat(inputs.y.value),z:parseFloat(inputs.z.value)});
+ for(const input of Object.values(inputs)){input.onchange=commit;}
+ control.append(group);
+ return label;
+}
+function renderRotatorProperty(host,ownerType,componentId,p){
+ const {label,control}=createRow(p);
+ const value=p.value||{};
+ const fields=[['pitch','Pitch'],['yaw','Yaw'],['roll','Roll']];
+ const group=document.createElement('div');
+ group.className='rotator-group';
+ const inputs={};
+ for(const [key,placeholder] of fields){
+  const input=makeNumberInput(numberOrNull(value[key]) ?? 0,placeholder);
+  inputs[key]=input;
+  group.append(input);
+ }
+ const commit=()=>commitProperty(host,ownerType,componentId,p,{pitch:parseFloat(inputs.pitch.value),yaw:parseFloat(inputs.yaw.value),roll:parseFloat(inputs.roll.value)});
+ for(const input of Object.values(inputs)){input.onchange=commit;}
+ control.append(group);
+ return label;
+}
+function colorToHexComponent(v){
+ return Math.max(0,Math.min(255,Math.round((numberOrNull(v) ?? 0)*255))).toString(16).padStart(2,'0');
+}
+function linearToSrgbComponent(v){
+ const x=Math.max(0,numberOrNull(v) ?? 0);
+ const srgb=x<=0.0031308 ? x*12.92 : 1.055*Math.pow(x,1/2.4)-0.055;
+ return Math.max(0,Math.min(255,Math.round(srgb*255))).toString(16).padStart(2,'0');
+}
+function srgbToLinearComponent(v){
+ const x=Math.max(0,Math.min(1,numberOrNull(v) ?? 0));
+ return x<=0.04045 ? x/12.92 : Math.pow((x+0.055)/1.055,2.4);
+}
+function colorToHex(value,linearSpace=false){
+ return linearSpace
+  ? `#${linearToSrgbComponent(value.r)}${linearToSrgbComponent(value.g)}${linearToSrgbComponent(value.b)}`
+  : `#${colorToHexComponent(value.r)}${colorToHexComponent(value.g)}${colorToHexComponent(value.b)}`;
+}
+function hexToColor(hex,alpha){
+ const clean=String(hex||'').replace('#','');
+ const r=parseInt(clean.slice(0,2)||'00',16)/255;
+ const g=parseInt(clean.slice(2,4)||'00',16)/255;
+ const b=parseInt(clean.slice(4,6)||'00',16)/255;
+ return {r,g,b,a:alpha};
+}
+function colorToCssRgba(value,linearSpace=false){
+ const r=Math.max(0,Math.min(255,Math.round((linearSpace ? (numberOrNull(value.r) ?? 0) <= 0.0031308 ? (numberOrNull(value.r) ?? 0) * 12.92 : 1.055 * Math.pow(numberOrNull(value.r) ?? 0, 1 / 2.4) - 0.055 : (numberOrNull(value.r) ?? 0))*255)));
+ const g=Math.max(0,Math.min(255,Math.round((linearSpace ? (numberOrNull(value.g) ?? 0) <= 0.0031308 ? (numberOrNull(value.g) ?? 0) * 12.92 : 1.055 * Math.pow(numberOrNull(value.g) ?? 0, 1 / 2.4) - 0.055 : (numberOrNull(value.g) ?? 0))*255)));
+ const b=Math.max(0,Math.min(255,Math.round((linearSpace ? (numberOrNull(value.b) ?? 0) <= 0.0031308 ? (numberOrNull(value.b) ?? 0) * 12.92 : 1.055 * Math.pow(numberOrNull(value.b) ?? 0, 1 / 2.4) - 0.055 : (numberOrNull(value.b) ?? 0))*255)));
+ const a=numberOrNull(value.a);
+ return `rgba(${r},${g},${b},${a!==null?a:1})`;
+}
+function getContrastColor(value){
+ const r=(numberOrNull(value.r) ?? 0);
+ const g=(numberOrNull(value.g) ?? 0);
+ const b=(numberOrNull(value.b) ?? 0);
+ const luminance=(0.2126*r)+(0.7152*g)+(0.0722*b);
+ return luminance > 0.55 ? '#101216' : '#ffffff';
+}
+function renderColorLikeProperty(host,ownerType,componentId,p,clamp01,displayLinearSpace,pickerLinearSpace){
+ const {label,control}=createRow(p);
+ const value=p.value||{};
+ control.classList.add(clamp01 ? 'color-swatch' : 'linear-color-swatch');
+ control.style.backgroundColor=colorToCssRgba(value,displayLinearSpace);
+ control.style.color=getContrastColor(value);
+ const group=document.createElement('div');
+ group.className='linear-color-group';
+ const picker=document.createElement('input');
+ picker.type='color';
+ picker.value=colorToHex(value,pickerLinearSpace);
+ const fields=[['r','R'],['g','G'],['b','B'],['a','A']];
+ const inputs={};
+ const numericGroup=document.createElement('div');
+ numericGroup.style.display='grid';
+ numericGroup.style.gridTemplateColumns='repeat(4,minmax(0,1fr))';
+ numericGroup.style.gap='8px';
+ for(const [key,placeholder] of fields){
+  const input=document.createElement('input');
+  input.type='number';
+  input.step='0.01';
+  if(clamp01){
+   input.min='0';
+   input.max='1';
+  }
+  input.className='numeric-field';
+  input.value=String(numberOrNull(value[key]) ?? (key==='a' ? 1 : 0));
+  input.placeholder=placeholder;
+  inputs[key]=input;
+  numericGroup.append(input);
+ }
+ const refreshSwatch=()=>{
+  const next={
+   r:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.r.value))) : parseFloat(inputs.r.value),
+   g:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.g.value))) : parseFloat(inputs.g.value),
+   b:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.b.value))) : parseFloat(inputs.b.value),
+   a:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.a.value))) : parseFloat(inputs.a.value)
+  };
+  control.style.backgroundColor=colorToCssRgba(next,displayLinearSpace);
+  control.style.color=getContrastColor(next);
+  picker.value=colorToHex(next,pickerLinearSpace);
+ };
+ const commit=()=>{
+  const next={
+   r:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.r.value))) : parseFloat(inputs.r.value),
+   g:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.g.value))) : parseFloat(inputs.g.value),
+   b:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.b.value))) : parseFloat(inputs.b.value),
+   a:clamp01 ? Math.min(1, Math.max(0, parseFloat(inputs.a.value))) : parseFloat(inputs.a.value)
+  };
+  commitProperty(host,ownerType,componentId,p,next);
+ };
+ picker.oninput=()=>{
+  const next=hexToColor(picker.value,parseFloat(inputs.a.value));
+  inputs.r.value=String(pickerLinearSpace ? srgbToLinearComponent(next.r) : next.r);
+  inputs.g.value=String(pickerLinearSpace ? srgbToLinearComponent(next.g) : next.g);
+  inputs.b.value=String(pickerLinearSpace ? srgbToLinearComponent(next.b) : next.b);
+  refreshSwatch();
+  commit();
+ };
+ for(const input of Object.values(inputs)){
+  input.onchange=()=>{refreshSwatch(); commit();};
+ }
+ group.append(picker,numericGroup);
+ control.append(group);
+ return label;
+}
+function renderProperty(host,ownerType,componentId,p){
+ if(p.type==='bool') return renderBoolProperty(host,ownerType,componentId,p);
+ if(p.type==='int32' || p.type==='float') return renderNumericProperty(host,ownerType,componentId,p);
+ if(p.type==='enum') return renderEnumProperty(host,ownerType,componentId,p);
+ if(p.type==='vector') return renderVectorProperty(host,ownerType,componentId,p);
+ if(p.type==='rotator') return renderRotatorProperty(host,ownerType,componentId,p);
+ if(p.type==='color') return renderColorLikeProperty(host,ownerType,componentId,p,true,true,false);
+ if(p.type==='linearColor') return renderColorLikeProperty(host,ownerType,componentId,p,false,true,true);
+ return renderStringProperty(host,ownerType,componentId,p);
 }
 function renderProperties(host,ownerType,componentId,properties){
  const section=document.createElement('section');
  for(const p of properties||[]){
-  const label=document.createElement('label');
-  const input=makeInput(p);
-  input.onchange=async()=>{
-   let value=input.type==='checkbox'?input.checked:input.value;
-   if(p.type==='float') value=parseFloat(value);
-   if(p.type==='int32') value=parseInt(value,10);
-   if(['vector','rotator','linearColor'].includes(p.type)) value=JSON.parse(input.value);
-   await api('/api/webui/property',{webUIId:host.webUIId,ownerType,componentId,propertyName:p.name,value});
-  };
-  label.append(p.name,input);
-  section.append(label);
+  section.append(renderProperty(host,ownerType,componentId,p));
  }
  return section;
 }
-function renderComponent(host,c){
- const cs=document.createElement('section');
- cs.className='component';
- cs.innerHTML=`<h3>${c.name}</h3>`;
- cs.append(renderProperties(host,'component',c.componentId,c.properties));
+)HTML")
+TEXT(R"HTML(
+function renderButtonRow(host,ownerType,componentId,buttons){
  const buttonRow=document.createElement('div');
  buttonRow.className='button-list';
- for(const b of c.buttons){
+ for(const b of buttons||[]){
   const btn=document.createElement('button');
   btn.className='webui-button';
   btn.textContent=b.id;
@@ -97,15 +359,23 @@ function renderComponent(host,c){
    btn.classList.add('pressed');
    btn.disabled=true;
    try{
-    await api('/api/webui/button',{webUIId:host.webUIId,componentId:c.componentId,buttonId:b.id});
+    await api('/api/webui/button',{webUIId:host.webUIId,ownerType,componentId,buttonId:b.id});
     await load();
    }finally{
     btn.classList.remove('pressed');
     btn.disabled=false;
    }
-   };
+  };
   buttonRow.append(btn);
  }
+ return buttonRow;
+}
+function renderComponent(host,c){
+ const cs=document.createElement('section');
+ cs.className='component';
+ cs.innerHTML=`<h3>${c.name}</h3>`;
+ cs.append(renderProperties(host,'component',c.componentId,c.properties));
+ const buttonRow=renderButtonRow(host,'component',c.componentId,c.buttons);
  if(c.buttons.length){ cs.append(buttonRow); }
  return cs;
 }
@@ -149,11 +419,16 @@ async function load(){
   panel.className='panel';
   panel.dataset.webuiPanel=host.webUIId;
   panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
-  if((host.actorProperties||[]).length){
+  if((host.actorProperties||[]).length || (host.hostButtons||[]).length){
    const actorSection=document.createElement('section');
    actorSection.className='component';
    actorSection.innerHTML='<h3>Actor</h3>';
-   actorSection.append(renderProperties(host,'actor','',host.actorProperties));
+   if((host.actorProperties||[]).length){
+    actorSection.append(renderProperties(host,'actor','',host.actorProperties));
+   }
+   if((host.hostButtons||[]).length){
+    actorSection.append(renderButtonRow(host,'host','',host.hostButtons));
+   }
    panel.append(actorSection);
   }
   for(const c of host.components||[]){
@@ -177,6 +452,75 @@ load();
 		Object->SetBoolField(TEXT("ok"), false);
 		Object->SetStringField(TEXT("error"), Error);
 		return Object;
+	}
+
+	TOptional<double> ReadMetaNumber(const FProperty* Property, const TCHAR* Key)
+	{
+		if (!Property || !Property->HasMetaData(Key))
+		{
+			return {};
+		}
+
+		double Value = 0.0;
+		const FString MetaValue = Property->GetMetaData(Key);
+		if (!MetaValue.IsEmpty() && LexTryParseString(Value, *MetaValue))
+		{
+			return Value;
+		}
+		return {};
+	}
+
+	void AddNumericSchemaFields(const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
+	{
+		const TOptional<double> UIMin = ReadMetaNumber(Property, TEXT("UIMin"));
+		const TOptional<double> UIMax = ReadMetaNumber(Property, TEXT("UIMax"));
+		const TOptional<double> ClampMin = ReadMetaNumber(Property, TEXT("ClampMin"));
+		const TOptional<double> ClampMax = ReadMetaNumber(Property, TEXT("ClampMax"));
+		const TOptional<double> SliderMin = ReadMetaNumber(Property, TEXT("SliderMin"));
+		const TOptional<double> SliderMax = ReadMetaNumber(Property, TEXT("SliderMax"));
+		const TOptional<double> Delta = ReadMetaNumber(Property, TEXT("Delta"));
+
+		if (UIMin.IsSet()) PropertyObject->SetNumberField(TEXT("uiMin"), UIMin.GetValue());
+		if (UIMax.IsSet()) PropertyObject->SetNumberField(TEXT("uiMax"), UIMax.GetValue());
+		if (ClampMin.IsSet()) PropertyObject->SetNumberField(TEXT("clampMin"), ClampMin.GetValue());
+		if (ClampMax.IsSet()) PropertyObject->SetNumberField(TEXT("clampMax"), ClampMax.GetValue());
+		if (SliderMin.IsSet()) PropertyObject->SetNumberField(TEXT("sliderMin"), SliderMin.GetValue());
+		if (SliderMax.IsSet()) PropertyObject->SetNumberField(TEXT("sliderMax"), SliderMax.GetValue());
+		if (Delta.IsSet()) PropertyObject->SetNumberField(TEXT("step"), Delta.GetValue());
+	}
+
+	void AddEnumSchemaFields(const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
+	{
+		const UEnum* Enum = nullptr;
+		if (const FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
+		{
+			Enum = EnumProperty->GetEnum();
+		}
+		else if (const FByteProperty* ByteProperty = CastField<FByteProperty>(Property))
+		{
+			Enum = ByteProperty->Enum;
+		}
+
+		if (!Enum)
+		{
+			return;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Options;
+		for (int32 Index = 0; Index < Enum->NumEnums(); ++Index)
+		{
+			const FString EnumName = Enum->GetNameStringByIndex(Index);
+			if (EnumName == TEXT("MAX") || EnumName.EndsWith(TEXT("_MAX")))
+			{
+				continue;
+			}
+
+			TSharedRef<FJsonObject> OptionObject = MakeShared<FJsonObject>();
+			OptionObject->SetStringField(TEXT("value"), EnumName);
+			OptionObject->SetStringField(TEXT("label"), Enum->GetDisplayNameTextByIndex(Index).ToString());
+			Options.Add(MakeShared<FJsonValueObject>(OptionObject));
+		}
+		PropertyObject->SetArrayField(TEXT("options"), Options);
 	}
 }
 
@@ -326,16 +670,53 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 	}
 
 	const FString WebUIId = Body->GetStringField(TEXT("webUIId"));
+	const FString OwnerType = Body->HasField(TEXT("ownerType")) ? Body->GetStringField(TEXT("ownerType")) : TEXT("component");
 	const FString ComponentId = Body->GetStringField(TEXT("componentId"));
 	const FName ButtonId(*Body->GetStringField(TEXT("buttonId")));
-	UWebUIComponentBase* Component = Cast<UWebUIComponentBase>(FindComponent(WebUIId, ComponentId));
-	if (!Component || ButtonId.IsNone() || !Component->GetWebUIButtons().Contains(ButtonId))
+	UWebUIHostComponent* Host = nullptr;
+	UObject* Owner = FindPropertyOwner(WebUIId, OwnerType, ComponentId, Host);
+	if (!Owner || ButtonId.IsNone())
 	{
 		OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 		return true;
 	}
 
-	Component->NotifyWebUIButtonClicked(ButtonId);
+	if (OwnerType.Equals(TEXT("host"), ESearchCase::IgnoreCase))
+	{
+		if (!Host || !Host->GetWebUIButtons().Contains(ButtonId))
+		{
+			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
+			return true;
+		}
+		Host->NotifyWebUIButtonClicked(ButtonId);
+	}
+	else if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
+	{
+		if (AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(Owner))
+		{
+			if (!HostActor->GetWebUIButtons().Contains(ButtonId))
+			{
+				OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
+				return true;
+			}
+			HostActor->NotifyWebUIButtonClicked(ButtonId);
+		}
+		else
+		{
+			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
+			return true;
+		}
+	}
+	else
+	{
+		UWebUIComponentBase* Component = Cast<UWebUIComponentBase>(Owner);
+		if (!Component || !Component->GetWebUIButtons().Contains(ButtonId))
+		{
+			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
+			return true;
+		}
+		Component->NotifyWebUIButtonClicked(ButtonId);
+	}
 
 	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
 	Response->SetBoolField(TEXT("ok"), true);
@@ -359,6 +740,14 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		HostObject->SetStringField(TEXT("webUIId"), Host->GetWebUIId());
 		HostObject->SetStringField(TEXT("actorName"), Host->GetOwner()->GetName());
 		HostObject->SetStringField(TEXT("description"), Host->GetDescription());
+		TArray<TSharedPtr<FJsonValue>> HostButtonValues;
+		for (const FName Button : Host->GetWebUIButtons())
+		{
+			TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
+			ButtonObject->SetStringField(TEXT("id"), Button.ToString());
+			HostButtonValues.Add(MakeShared<FJsonValueObject>(ButtonObject));
+		}
+		HostObject->SetArrayField(TEXT("hostButtons"), HostButtonValues);
 		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner())))
 		{
 			HostObject->SetArrayField(TEXT("actorProperties"), ActorObject->GetArrayField(TEXT("properties")));
@@ -369,6 +758,10 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		Host->GetOwner()->GetComponents(Components);
 		for (UActorComponent* Component : Components)
 		{
+			if (Cast<UWebUIHostComponent>(Component))
+			{
+				continue;
+			}
 			if (TSharedPtr<FJsonObject> ComponentObject = BuildComponentSchema(Component))
 			{
 				ComponentValues.Add(MakeShared<FJsonValueObject>(ComponentObject));
@@ -403,6 +796,14 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 		PropertyObject->SetStringField(TEXT("name"), Property->GetName());
 		PropertyObject->SetStringField(TEXT("type"), GetPropertyWebUIType(Property));
 		PropertyObject->SetField(TEXT("value"), PropertyToJsonValue(Property, Actor));
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("float") || PropertyObject->GetStringField(TEXT("type")) == TEXT("int32"))
+		{
+			AddNumericSchemaFields(Property, PropertyObject);
+		}
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("enum"))
+		{
+			AddEnumSchemaFields(Property, PropertyObject);
+		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 
@@ -431,6 +832,14 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		PropertyObject->SetStringField(TEXT("name"), Property->GetName());
 		PropertyObject->SetStringField(TEXT("type"), GetPropertyWebUIType(Property));
 		PropertyObject->SetField(TEXT("value"), PropertyToJsonValue(Property, Component));
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("float") || PropertyObject->GetStringField(TEXT("type")) == TEXT("int32"))
+		{
+			AddNumericSchemaFields(Property, PropertyObject);
+		}
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("enum"))
+		{
+			AddEnumSchemaFields(Property, PropertyObject);
+		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 
@@ -468,7 +877,11 @@ UObject* UWebUIRuntimeSubsystem::FindPropertyOwner(const FString& WebUIId, const
 			continue;
 		}
 
-		OutHost = Host;
+	OutHost = Host;
+		if (OwnerType.Equals(TEXT("host"), ESearchCase::IgnoreCase))
+		{
+			return Host;
+		}
 		if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
 		{
 			return Host->GetOwner();
@@ -681,6 +1094,17 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 			*static_cast<FVector*>(PropertyPtr) = Vector;
 			NotifyVectorChanged(*PropertyName, Vector);
 		}
+		else if (StructProperty->Struct == TBaseStructure<FColor>::Get())
+		{
+			const FLinearColor LinearColor(
+				static_cast<float>(ObjectValue->GetNumberField(TEXT("r"))),
+				static_cast<float>(ObjectValue->GetNumberField(TEXT("g"))),
+				static_cast<float>(ObjectValue->GetNumberField(TEXT("b"))),
+				static_cast<float>(ObjectValue->GetNumberField(TEXT("a"))));
+			const FColor Color = LinearColor.ToFColor(true);
+			*static_cast<FColor*>(PropertyPtr) = Color;
+			NotifyColorChanged(*PropertyName, LinearColor);
+		}
 		else if (StructProperty->Struct == TBaseStructure<FRotator>::Get())
 		{
 			FRotator Rotator(ObjectValue->GetNumberField(TEXT("pitch")), ObjectValue->GetNumberField(TEXT("yaw")), ObjectValue->GetNumberField(TEXT("roll")));
@@ -773,6 +1197,15 @@ TSharedPtr<FJsonValue> UWebUIRuntimeSubsystem::PropertyToJsonValue(FProperty* Pr
 			Object->SetNumberField(TEXT("roll"), Value.Roll);
 			return MakeShared<FJsonValueObject>(Object);
 		}
+		if (StructProperty->Struct == TBaseStructure<FColor>::Get())
+		{
+			const FColor& Value = *static_cast<const FColor*>(PropertyPtr);
+			Object->SetNumberField(TEXT("r"), Value.R / 255.0);
+			Object->SetNumberField(TEXT("g"), Value.G / 255.0);
+			Object->SetNumberField(TEXT("b"), Value.B / 255.0);
+			Object->SetNumberField(TEXT("a"), Value.A / 255.0);
+			return MakeShared<FJsonValueObject>(Object);
+		}
 		if (StructProperty->Struct == TBaseStructure<FLinearColor>::Get())
 		{
 			const FLinearColor& Value = *static_cast<const FLinearColor*>(PropertyPtr);
@@ -799,6 +1232,7 @@ FString UWebUIRuntimeSubsystem::GetPropertyWebUIType(FProperty* Property) const
 	}
 	if (const FStructProperty* StructProperty = CastField<FStructProperty>(Property))
 	{
+		if (StructProperty->Struct == TBaseStructure<FColor>::Get()) return TEXT("color");
 		if (StructProperty->Struct == TBaseStructure<FVector>::Get()) return TEXT("vector");
 		if (StructProperty->Struct == TBaseStructure<FRotator>::Get()) return TEXT("rotator");
 		if (StructProperty->Struct == TBaseStructure<FLinearColor>::Get()) return TEXT("linearColor");
@@ -808,9 +1242,16 @@ FString UWebUIRuntimeSubsystem::GetPropertyWebUIType(FProperty* Property) const
 
 bool UWebUIRuntimeSubsystem::IsWebUIProperty(FProperty* Property) const
 {
+	auto IsWebUICategory = [](const FString& Category)
+	{
+		FString Normalized = Category;
+		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
+		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
+	};
+
 	return Property
 		&& GetPropertyWebUIType(Property) != TEXT("unsupported")
-		&& (Property->HasMetaData(TEXT("WebUI")) || Property->GetMetaData(TEXT("Category")) == TEXT("WebUI"));
+		&& (Property->HasMetaData(TEXT("WebUI")) || IsWebUICategory(Property->GetMetaData(TEXT("Category"))));
 }
 
 TUniquePtr<FHttpServerResponse> UWebUIRuntimeSubsystem::MakeJsonResponse(const TSharedRef<FJsonObject>& Object) const
