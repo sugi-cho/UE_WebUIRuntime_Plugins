@@ -16,23 +16,28 @@
 1. Unreal Engine プロジェクトの `Plugins/` にこのリポジトリの Plugin を配置します。
 2. `UE_WebUIRuntime.uproject` で `WebUIRuntime` と必要なら `WebUI_NDI` を有効化します。
 3. Project Settings の `Plugins > Web UI Runtime` で `Port` を設定します。
-4. `WebUIHostComponent` を持つ Actor を配置して Web UI を起動します。
+4. 同じ画面の `Allow Remote Access` を有効にすると、LAN 内の端末からもアクセスできます。
+5. `WebUIHostComponent` を持つ Actor を配置して Web UI を起動します。
 
 複数の Actor が `WebUIHostComponent` を持つ場合、Web UI は `WebUIId` ごとのタブで切り替えます。
 タブ名は `WebUIId` を使います。
+タブ下の説明には `WebUIHostComponent` の `Description` を表示します。
 
 ## `WebUIHostComponent` について
 
 - Web UI の起動と集約を担当します。
 - Actor ごとの識別子として `WebUIId` を持ちます。
+- タブ説明用の `Description` を持ちます。
 - `WebUIId` が未設定なら Actor 名を使います。
 - ポートは個別設定ではなく、Project Settings の 1 設定を使います。
+- `Allow Remote Access` を有効にすると、HTTPServer の bind を `any` にして LAN 内から見えるようにします。
 
 ## `WebUIComponent` について
 
 - 実際の UI 要素は `WebUIComponentBase` か、その派生クラスに置きます。
 - `WebUIComponentBase` はそのまま使ってもよいですし、独自の Component を作って継承しても使えます。
 - たとえば NDI 用の `WebUINDIComponent` のように、用途ごとに派生 Component を追加できます。
+- `WebUIHostComponent` を持つ Actor には、Actor 自身の `WebUI` 変数も上段に表示され、その下に Component ごとのセクションが並びます。
 
 ## Property を WebUI に出す方法
 
