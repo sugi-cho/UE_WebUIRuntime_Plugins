@@ -8,6 +8,7 @@
 class FJsonObject;
 class FJsonValue;
 class IHttpRouter;
+class AActor;
 class UActorComponent;
 class UWebUIHostComponent;
 struct FHttpServerRequest;
@@ -44,13 +45,16 @@ private:
 	bool HandleButton(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 
 	TSharedRef<FJsonObject> BuildSchema() const;
+	TSharedPtr<FJsonObject> BuildActorSchema(AActor* Actor) const;
 	TSharedPtr<FJsonObject> BuildComponentSchema(UActorComponent* Component) const;
+	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
 
-	bool SetPropertyFromJson(UActorComponent* Component, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError);
+	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
 	FString GetPropertyWebUIType(FProperty* Property) const;
 	bool IsWebUIProperty(FProperty* Property) const;
+	void ApplyHttpServerBindAddressSetting() const;
 
 	TUniquePtr<struct FHttpServerResponse> MakeJsonResponse(const TSharedRef<FJsonObject>& Object) const;
 	TSharedPtr<FJsonObject> ParseRequestJson(const FHttpServerRequest& Request, FString& OutError) const;

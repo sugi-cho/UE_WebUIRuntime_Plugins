@@ -1,6 +1,7 @@
 #include "WebUIRuntimeSubsystem.h"
 
 #include "Components/ActorComponent.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "HttpPath.h"
 #include "HttpServerModule.h"
@@ -9,6 +10,7 @@
 #include "IHttpRouter.h"
 #include "Json.h"
 #include "Math/Color.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Serialization/JsonSerializer.h"
 #include "WebUIComponentBase.h"
 #include "WebUIHostComponent.h"
@@ -30,10 +32,11 @@ namespace
 <style>
 body{font-family:system-ui,sans-serif;margin:24px;background:#101216;color:#e9edf2}
 h1{margin:0 0 16px}
-.tabs{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 20px}
-.tab{border:1px solid #3d4654;background:#0d1015;color:#e9edf2;padding:8px 12px;border-radius:999px;cursor:pointer}
-.tab.active{background:#233247;border-color:#5b7898}
-.panel{display:none;border:1px solid #2d3440;border-radius:8px;padding:16px;margin:16px 0;background:#171b22}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid #2d3440}
+.tab{border:1px solid #2d3440;border-bottom:none;background:#12161d;color:#cfd6df;padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
+.tab.active{background:#171b22;color:#ffffff;border-color:#5b7898;border-bottom:1px solid #171b22;z-index:1}
+.tab:not(.active){opacity:.9}
+.panel{display:none;border:1px solid #2d3440;border-top:none;border-radius:0 8px 8px 8px;padding:16px;margin:0 0 16px;background:#171b22}
 .panel.active{display:block}
 .host-meta{opacity:.78;margin-top:4px}
 .component{border-top:1px solid #2d3440;padding-top:12px;margin-top:12px}
@@ -62,11 +65,9 @@ function makeInput(p){
  if(p.type==='float'||p.type==='int32'){el.type='number'; if(p.type==='float') el.step='0.01';}
  return el;
 }
-function renderComponent(host,c){
- const cs=document.createElement('section');
- cs.className='component';
- cs.innerHTML=`<h3>${c.name}</h3>`;
- for(const p of c.properties){
+function renderProperties(host,ownerType,componentId,properties){
+ const section=document.createElement('section');
+ for(const p of properties||[]){
   const label=document.createElement('label');
   const input=makeInput(p);
   input.onchange=async()=>{
@@ -74,11 +75,18 @@ function renderComponent(host,c){
    if(p.type==='float') value=parseFloat(value);
    if(p.type==='int32') value=parseInt(value,10);
    if(['vector','rotator','linearColor'].includes(p.type)) value=JSON.parse(input.value);
-   await api('/api/webui/property',{webUIId:host.webUIId,componentId:c.componentId,propertyName:p.name,value});
+   await api('/api/webui/property',{webUIId:host.webUIId,ownerType,componentId,propertyName:p.name,value});
   };
   label.append(p.name,input);
-  cs.append(label);
+  section.append(label);
  }
+ return section;
+}
+function renderComponent(host,c){
+ const cs=document.createElement('section');
+ cs.className='component';
+ cs.innerHTML=`<h3>${c.name}</h3>`;
+ cs.append(renderProperties(host,'component',c.componentId,c.properties));
  const buttonRow=document.createElement('div');
  buttonRow.className='button-list';
  for(const b of c.buttons){
@@ -140,7 +148,14 @@ async function load(){
   const panel=document.createElement('section');
   panel.className='panel';
   panel.dataset.webuiPanel=host.webUIId;
-  panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.actorName}</div>`;
+  panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+  if((host.actorProperties||[]).length){
+   const actorSection=document.createElement('section');
+   actorSection.className='component';
+   actorSection.innerHTML='<h3>Actor</h3>';
+   actorSection.append(renderProperties(host,'actor','',host.actorProperties));
+   panel.append(actorSection);
+  }
   for(const c of host.components||[]){
    panel.append(renderComponent(host,c));
   }
@@ -172,6 +187,7 @@ bool UWebUIRuntimeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 
 bool UWebUIRuntimeSubsystem::StartServerFromSettings()
 {
+	ApplyHttpServerBindAddressSetting();
 	return StartServer(GetDefault<UWebUIRuntimeSettings>()->Port);
 }
 
@@ -249,6 +265,14 @@ int32 UWebUIRuntimeSubsystem::GetServerPort() const
 	return ActivePort;
 }
 
+void UWebUIRuntimeSubsystem::ApplyHttpServerBindAddressSetting() const
+{
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	const FString BindAddress = Settings && Settings->bAllowRemoteAccess ? TEXT("any") : TEXT("localhost");
+	GConfig->SetString(TEXT("HTTPServer.Listeners"), TEXT("DefaultBindAddress"), *BindAddress, GEngineIni);
+	GConfig->Flush(false, GEngineIni);
+}
+
 bool UWebUIRuntimeSubsystem::HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
 {
 	OnComplete(FHttpServerResponse::Create(FString(WebUIHtml), HtmlContentType));
@@ -272,12 +296,14 @@ bool UWebUIRuntimeSubsystem::HandleProperty(const FHttpServerRequest& Request, c
 	}
 
 	const FString WebUIId = Body->GetStringField(TEXT("webUIId"));
-	const FString ComponentId = Body->GetStringField(TEXT("componentId"));
+	const FString OwnerType = Body->HasField(TEXT("ownerType")) ? Body->GetStringField(TEXT("ownerType")) : TEXT("component");
+	const FString ComponentId = Body->HasField(TEXT("componentId")) ? Body->GetStringField(TEXT("componentId")) : FString();
 	const FString PropertyName = Body->GetStringField(TEXT("propertyName"));
 	const TSharedPtr<FJsonValue> Value = Body->TryGetField(TEXT("value"));
-	UActorComponent* Component = FindComponent(WebUIId, ComponentId);
+	UWebUIHostComponent* Host = nullptr;
+	UObject* Owner = FindPropertyOwner(WebUIId, OwnerType, ComponentId, Host);
 
-	if (!Component || !Value.IsValid() || !SetPropertyFromJson(Component, PropertyName, Value, Error))
+	if (!Owner || !Value.IsValid() || !SetPropertyFromJson(Owner, Host, PropertyName, Value, Error))
 	{
 		OnComplete(MakeJsonResponse(MakeErrorObject(Error.IsEmpty() ? TEXT("Failed to set property") : Error)));
 		return true;
@@ -332,6 +358,11 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		TSharedRef<FJsonObject> HostObject = MakeShared<FJsonObject>();
 		HostObject->SetStringField(TEXT("webUIId"), Host->GetWebUIId());
 		HostObject->SetStringField(TEXT("actorName"), Host->GetOwner()->GetName());
+		HostObject->SetStringField(TEXT("description"), Host->GetDescription());
+		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner())))
+		{
+			HostObject->SetArrayField(TEXT("actorProperties"), ActorObject->GetArrayField(TEXT("properties")));
+		}
 
 		TArray<TSharedPtr<FJsonValue>> ComponentValues;
 		TArray<UActorComponent*> Components;
@@ -350,6 +381,34 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 
 	Root->SetArrayField(TEXT("hosts"), HostValues);
 	return Root;
+}
+
+TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) const
+{
+	if (!IsValid(Actor))
+	{
+		return nullptr;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> PropertyValues;
+	for (TFieldIterator<FProperty> It(Actor->GetClass()); It; ++It)
+	{
+		FProperty* Property = *It;
+		if (!IsWebUIProperty(Property))
+		{
+			continue;
+		}
+
+		TSharedRef<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
+		PropertyObject->SetStringField(TEXT("name"), Property->GetName());
+		PropertyObject->SetStringField(TEXT("type"), GetPropertyWebUIType(Property));
+		PropertyObject->SetField(TEXT("value"), PropertyToJsonValue(Property, Actor));
+		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
+	}
+
+	TSharedRef<FJsonObject> ActorObject = MakeShared<FJsonObject>();
+	ActorObject->SetArrayField(TEXT("properties"), PropertyValues);
+	return ActorObject;
 }
 
 TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorComponent* Component) const
@@ -400,6 +459,30 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	return ComponentObject;
 }
 
+UObject* UWebUIRuntimeSubsystem::FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const
+{
+	for (UWebUIHostComponent* Host : Hosts)
+	{
+		if (!IsValid(Host) || Host->GetWebUIId() != WebUIId || !IsValid(Host->GetOwner()))
+		{
+			continue;
+		}
+
+		OutHost = Host;
+		if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
+		{
+			return Host->GetOwner();
+		}
+		if (OwnerType.Equals(TEXT("component"), ESearchCase::IgnoreCase))
+		{
+			return FindComponent(WebUIId, ComponentId);
+		}
+		break;
+	}
+
+	return nullptr;
+}
+
 UActorComponent* UWebUIRuntimeSubsystem::FindComponent(const FString& WebUIId, const FString& ComponentId) const
 {
 	for (UWebUIHostComponent* Host : Hosts)
@@ -422,23 +505,104 @@ UActorComponent* UWebUIRuntimeSubsystem::FindComponent(const FString& WebUIId, c
 	return nullptr;
 }
 
-bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UActorComponent* Component, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError)
+bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError)
 {
-	FProperty* Property = FindFProperty<FProperty>(Component->GetClass(), *PropertyName);
+	FProperty* Property = FindFProperty<FProperty>(Owner->GetClass(), *PropertyName);
 	if (!Property || !IsWebUIProperty(Property))
 	{
 		OutError = TEXT("Property not found or not exposed to WebUI");
 		return false;
 	}
 
-	void* PropertyPtr = Property->ContainerPtrToValuePtr<void>(Component);
+	auto NotifyPropertyChanged = [&](FName Name)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIPropertyChanged(Name);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIPropertyChanged(Name);
+		}
+	};
+
+	auto NotifyBoolChanged = [&](FName Name, bool ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIBoolChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIBoolChanged(Name, ValueToSend);
+		}
+	};
+
+	auto NotifyFloatChanged = [&](FName Name, double ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIFloatChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIFloatChanged(Name, ValueToSend);
+		}
+	};
+
+	auto NotifyStringChanged = [&](FName Name, const FString& ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIStringChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIStringChanged(Name, ValueToSend);
+		}
+	};
+
+	auto NotifyVectorChanged = [&](FName Name, FVector ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIVectorChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIVectorChanged(Name, ValueToSend);
+		}
+	};
+
+	auto NotifyRotatorChanged = [&](FName Name, FRotator ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIRotatorChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIRotatorChanged(Name, ValueToSend);
+		}
+	};
+
+	auto NotifyColorChanged = [&](FName Name, FLinearColor ValueToSend)
+	{
+		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+		{
+			WebUIComponent->NotifyWebUIColorChanged(Name, ValueToSend);
+		}
+		else if (Host)
+		{
+			Host->NotifyWebUIColorChanged(Name, ValueToSend);
+		}
+	};
+
+	void* PropertyPtr = Property->ContainerPtrToValuePtr<void>(Owner);
 	if (FBoolProperty* BoolProperty = CastField<FBoolProperty>(Property))
 	{
 		BoolProperty->SetPropertyValue(PropertyPtr, Value->AsBool());
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIBoolChanged(*PropertyName, Value->AsBool());
-		}
+		NotifyBoolChanged(*PropertyName, Value->AsBool());
 	}
 	else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
 	{
@@ -448,46 +612,31 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UActorComponent* Component, con
 	{
 		const double Number = Value->AsNumber();
 		FloatProperty->SetPropertyValue(PropertyPtr, static_cast<float>(Number));
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIFloatChanged(*PropertyName, Number);
-		}
+		NotifyFloatChanged(*PropertyName, Number);
 	}
 	else if (FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
 	{
 		const double Number = Value->AsNumber();
 		DoubleProperty->SetPropertyValue(PropertyPtr, Number);
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIFloatChanged(*PropertyName, Number);
-		}
+		NotifyFloatChanged(*PropertyName, Number);
 	}
 	else if (FStrProperty* StringProperty = CastField<FStrProperty>(Property))
 	{
 		const FString StringValue = Value->AsString();
 		StringProperty->SetPropertyValue(PropertyPtr, StringValue);
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIStringChanged(*PropertyName, StringValue);
-		}
+		NotifyStringChanged(*PropertyName, StringValue);
 	}
 	else if (FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
 		const FString StringValue = Value->AsString();
 		NameProperty->SetPropertyValue(PropertyPtr, FName(*StringValue));
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIStringChanged(*PropertyName, StringValue);
-		}
+		NotifyStringChanged(*PropertyName, StringValue);
 	}
 	else if (FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
 		const FString StringValue = Value->AsString();
 		TextProperty->SetPropertyValue(PropertyPtr, FText::FromString(StringValue));
-		if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-		{
-			WebUIComponent->NotifyWebUIStringChanged(*PropertyName, StringValue);
-		}
+		NotifyStringChanged(*PropertyName, StringValue);
 	}
 	else if (FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
 	{
@@ -530,28 +679,19 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UActorComponent* Component, con
 		{
 			FVector Vector(ObjectValue->GetNumberField(TEXT("x")), ObjectValue->GetNumberField(TEXT("y")), ObjectValue->GetNumberField(TEXT("z")));
 			*static_cast<FVector*>(PropertyPtr) = Vector;
-			if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-			{
-				WebUIComponent->NotifyWebUIVectorChanged(*PropertyName, Vector);
-			}
+			NotifyVectorChanged(*PropertyName, Vector);
 		}
 		else if (StructProperty->Struct == TBaseStructure<FRotator>::Get())
 		{
 			FRotator Rotator(ObjectValue->GetNumberField(TEXT("pitch")), ObjectValue->GetNumberField(TEXT("yaw")), ObjectValue->GetNumberField(TEXT("roll")));
 			*static_cast<FRotator*>(PropertyPtr) = Rotator;
-			if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-			{
-				WebUIComponent->NotifyWebUIRotatorChanged(*PropertyName, Rotator);
-			}
+			NotifyRotatorChanged(*PropertyName, Rotator);
 		}
 		else if (StructProperty->Struct == TBaseStructure<FLinearColor>::Get())
 		{
 			FLinearColor Color(ObjectValue->GetNumberField(TEXT("r")), ObjectValue->GetNumberField(TEXT("g")), ObjectValue->GetNumberField(TEXT("b")), ObjectValue->GetNumberField(TEXT("a")));
 			*static_cast<FLinearColor*>(PropertyPtr) = Color;
-			if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-			{
-				WebUIComponent->NotifyWebUIColorChanged(*PropertyName, Color);
-			}
+			NotifyColorChanged(*PropertyName, Color);
 		}
 		else
 		{
@@ -565,10 +705,7 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UActorComponent* Component, con
 		return false;
 	}
 
-	if (UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
-	{
-		WebUIComponent->NotifyWebUIPropertyChanged(*PropertyName);
-	}
+	NotifyPropertyChanged(*PropertyName);
 
 	return true;
 }

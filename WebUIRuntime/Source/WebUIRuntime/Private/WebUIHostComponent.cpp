@@ -69,6 +69,50 @@ int32 UWebUIHostComponent::GetWebUIPort() const
 	return GetDefault<UWebUIRuntimeSettings>()->Port;
 }
 
+FString UWebUIHostComponent::GetDescription() const
+{
+	if (!Description.IsEmpty())
+	{
+		return Description;
+	}
+	return GetOwner() ? GetOwner()->GetName() : GetName();
+}
+
+void UWebUIHostComponent::NotifyWebUIPropertyChanged(FName PropertyName)
+{
+	OnWebUIPropertyChanged.Broadcast(PropertyName);
+}
+
+void UWebUIHostComponent::NotifyWebUIBoolChanged(FName PropertyName, bool Value)
+{
+	OnWebUIBoolChanged.Broadcast(PropertyName, Value);
+}
+
+void UWebUIHostComponent::NotifyWebUIFloatChanged(FName PropertyName, double Value)
+{
+	OnWebUIFloatChanged.Broadcast(PropertyName, Value);
+}
+
+void UWebUIHostComponent::NotifyWebUIStringChanged(FName PropertyName, const FString& Value)
+{
+	OnWebUIStringChanged.Broadcast(PropertyName, Value);
+}
+
+void UWebUIHostComponent::NotifyWebUIVectorChanged(FName PropertyName, FVector Value)
+{
+	OnWebUIVectorChanged.Broadcast(PropertyName, Value);
+}
+
+void UWebUIHostComponent::NotifyWebUIRotatorChanged(FName PropertyName, FRotator Value)
+{
+	OnWebUIRotatorChanged.Broadcast(PropertyName, Value);
+}
+
+void UWebUIHostComponent::NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value)
+{
+	OnWebUIColorChanged.Broadcast(PropertyName, Value);
+}
+
 UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const
 {
 	const UWorld* World = GetWorld();

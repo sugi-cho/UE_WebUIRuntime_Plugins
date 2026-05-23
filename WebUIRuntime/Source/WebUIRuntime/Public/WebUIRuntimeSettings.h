@@ -12,6 +12,9 @@ class WEBUIRUNTIME_API UWebUIRuntimeSettings : public UDeveloperSettings
 public:
 	virtual FName GetCategoryName() const override;
 
-	UPROPERTY(EditAnywhere, Config, Category="Web UI", meta=(ClampMin="1", ClampMax="65535"))
+	UPROPERTY(EditAnywhere, Config, Category="Web UI", meta=(ClampMin="1", ClampMax="65535", ToolTip="TCP port used by the Web UI HTTP server."))
 	int32 Port = 8765;
+
+	UPROPERTY(EditAnywhere, Config, Category="Web UI", meta=(ToolTip="Allow LAN devices to access the Web UI by binding the HTTP server to any address."))
+	bool bAllowRemoteAccess = false;
 };
