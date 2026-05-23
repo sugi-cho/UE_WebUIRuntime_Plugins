@@ -11,8 +11,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWebUIHostStringChanged, FName, P
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWebUIHostVectorChanged, FName, PropertyName, FVector, Value);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWebUIHostRotatorChanged, FName, PropertyName, FRotator, Value);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWebUIHostColorChanged, FName, PropertyName, FLinearColor, Value);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIHostButtonClicked, FName, ButtonId);
 
 class UWebUIRuntimeSubsystem;
+class AWebUIHostActor;
 
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
 class WEBUIRUNTIME_API UWebUIHostComponent : public UActorComponent
@@ -22,6 +24,9 @@ class WEBUIRUNTIME_API UWebUIHostComponent : public UActorComponent
 public:
 	UWebUIHostComponent();
 
+	virtual void PostInitProperties() override;
+	virtual void PostLoad() override;
+	virtual void OnRegister() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
@@ -40,6 +45,18 @@ public:
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	FString GetDescription() const;
 
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	void RegisterWebUIButton(FName ButtonId);
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	void UnregisterWebUIButton(FName ButtonId);
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	void ClearWebUIButtons();
+
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	const TArray<FName>& GetWebUIButtons() const;
+
 	void NotifyWebUIPropertyChanged(FName PropertyName);
 	void NotifyWebUIBoolChanged(FName PropertyName, bool Value);
 	void NotifyWebUIFloatChanged(FName PropertyName, double Value);
@@ -47,14 +64,15 @@ public:
 	void NotifyWebUIVectorChanged(FName PropertyName, FVector Value);
 	void NotifyWebUIRotatorChanged(FName PropertyName, FRotator Value);
 	void NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value);
+	void NotifyWebUIButtonClicked(FName ButtonId);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(EditCondition="!bUseActorSettings", EditConditionHides))
 	bool bAutoStartServer = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(EditCondition="!bUseActorSettings", EditConditionHides))
 	FString WebUIId;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true, EditCondition="!bUseActorSettings", EditConditionHides))
 	FString Description;
 
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
@@ -78,6 +96,19 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
 	FOnWebUIHostColorChanged OnWebUIColorChanged;
 
+	UPROPERTY(BlueprintAssignable, Category="WebUI")
+	FOnWebUIHostButtonClicked OnWebUIButtonClicked;
+
+	UFUNCTION(BlueprintImplementableEvent, Category="WebUI", DisplayName="OnWebUIButtonClicked")
+	void K2_OnWebUIButtonClicked(FName ButtonId);
+
 private:
 	UWebUIRuntimeSubsystem* GetRuntimeSubsystem() const;
+	void RefreshOwnerSettingsMode();
+
+	UPROPERTY(Transient)
+	bool bUseActorSettings = false;
+
+	UPROPERTY(EditAnywhere, Category="WebUI Host")
+	TArray<FName> WebUIButtons;
 };

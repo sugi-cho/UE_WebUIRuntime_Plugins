@@ -1,5 +1,6 @@
 #include "WebUIHostComponent.h"
 
+#include "WebUIHostActor.h"
 #include "WebUIRuntimeSubsystem.h"
 #include "WebUIRuntimeSettings.h"
 
@@ -8,11 +9,31 @@ UWebUIHostComponent::UWebUIHostComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
+void UWebUIHostComponent::PostInitProperties()
+{
+	Super::PostInitProperties();
+	RefreshOwnerSettingsMode();
+}
+
+void UWebUIHostComponent::PostLoad()
+{
+	Super::PostLoad();
+	RefreshOwnerSettingsMode();
+}
+
+void UWebUIHostComponent::OnRegister()
+{
+	RefreshOwnerSettingsMode();
+	Super::OnRegister();
+}
+
 void UWebUIHostComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (WebUIId.IsEmpty() && GetOwner())
+	AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner());
+
+	if (WebUIId.IsEmpty() && GetOwner() && !HostActor)
 	{
 		WebUIId = GetOwner()->GetName();
 	}
@@ -20,7 +41,8 @@ void UWebUIHostComponent::BeginPlay()
 	if (UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem())
 	{
 		Runtime->RegisterHost(this);
-		if (bAutoStartServer)
+		const bool bShouldAutoStart = HostActor ? HostActor->ShouldAutoStartServer() : bAutoStartServer;
+		if (bShouldAutoStart)
 		{
 			Runtime->StartServerFromSettings();
 		}
@@ -57,6 +79,10 @@ void UWebUIHostComponent::StopWebUIServer()
 
 FString UWebUIHostComponent::GetWebUIId() const
 {
+	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
+	{
+		return HostActor->GetWebUIId();
+	}
 	if (!WebUIId.IsEmpty())
 	{
 		return WebUIId;
@@ -71,11 +97,38 @@ int32 UWebUIHostComponent::GetWebUIPort() const
 
 FString UWebUIHostComponent::GetDescription() const
 {
+	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
+	{
+		return HostActor->GetDescription();
+	}
 	if (!Description.IsEmpty())
 	{
 		return Description;
 	}
 	return GetOwner() ? GetOwner()->GetName() : GetName();
+}
+
+void UWebUIHostComponent::RegisterWebUIButton(FName ButtonId)
+{
+	if (!ButtonId.IsNone())
+	{
+		WebUIButtons.AddUnique(ButtonId);
+	}
+}
+
+void UWebUIHostComponent::UnregisterWebUIButton(FName ButtonId)
+{
+	WebUIButtons.Remove(ButtonId);
+}
+
+void UWebUIHostComponent::ClearWebUIButtons()
+{
+	WebUIButtons.Reset();
+}
+
+const TArray<FName>& UWebUIHostComponent::GetWebUIButtons() const
+{
+	return WebUIButtons;
 }
 
 void UWebUIHostComponent::NotifyWebUIPropertyChanged(FName PropertyName)
@@ -113,8 +166,24 @@ void UWebUIHostComponent::NotifyWebUIColorChanged(FName PropertyName, FLinearCol
 	OnWebUIColorChanged.Broadcast(PropertyName, Value);
 }
 
+void UWebUIHostComponent::NotifyWebUIButtonClicked(FName ButtonId)
+{
+	OnWebUIButtonClicked.Broadcast(ButtonId);
+	K2_OnWebUIButtonClicked(ButtonId);
+	if (AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
+	{
+		HostActor->NotifyWebUIButtonClicked(ButtonId);
+	}
+}
+
 UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const
 {
 	const UWorld* World = GetWorld();
 	return World ? World->GetSubsystem<UWebUIRuntimeSubsystem>() : nullptr;
+}
+
+void UWebUIHostComponent::RefreshOwnerSettingsMode()
+{
+	const AActor* OwnerActor = GetOwner() ? GetOwner() : GetTypedOuter<AActor>();
+	bUseActorSettings = Cast<AWebUIHostActor>(OwnerActor) != nullptr;
 }
