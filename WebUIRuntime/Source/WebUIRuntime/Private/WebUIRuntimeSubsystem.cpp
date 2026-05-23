@@ -39,7 +39,11 @@ h1{margin:0 0 16px}
 .component{border-top:1px solid #2d3440;padding-top:12px;margin-top:12px}
 label{display:grid;grid-template-columns:180px minmax(180px,1fr);gap:12px;align-items:center;margin:10px 0}
 input,button{font:inherit;padding:8px;border-radius:6px;border:1px solid #3d4654;background:#0d1015;color:#e9edf2}
+.button-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 button{cursor:pointer;background:#233247}
+button.webui-button{min-width:120px;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease}
+button.webui-button.pressed{background:#4b6f95;border-color:#8ab1dc;transform:translateY(1px)}
+button.webui-button:disabled{opacity:.72;cursor:default}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
 </style>
@@ -49,6 +53,7 @@ button{cursor:pointer;background:#233247}
 <main id="app"></main>
 <script>
 const app=document.getElementById('app');
+let currentWebUIId='';
 async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
 function makeInput(p){
  const el=document.createElement('input');
@@ -74,18 +79,31 @@ function renderComponent(host,c){
   label.append(p.name,input);
   cs.append(label);
  }
+ const buttonRow=document.createElement('div');
+ buttonRow.className='button-list';
  for(const b of c.buttons){
- const row=document.createElement('div');
-  row.className='row';
   const btn=document.createElement('button');
+  btn.className='webui-button';
   btn.textContent=b.id;
-  btn.onclick=async()=>{await api('/api/webui/button',{webUIId:host.webUIId,componentId:c.componentId,buttonId:b.id}); await load();};
-  row.append(btn);
-  cs.append(row);
+  btn.onclick=async()=>{
+   btn.classList.add('pressed');
+   btn.disabled=true;
+   try{
+    await api('/api/webui/button',{webUIId:host.webUIId,componentId:c.componentId,buttonId:b.id});
+    await load();
+   }finally{
+    btn.classList.remove('pressed');
+    btn.disabled=false;
+   }
+   };
+  buttonRow.append(btn);
  }
+ if(c.buttons.length){ cs.append(buttonRow); }
  return cs;
 }
 async function load(){
+ const restoreWebUIId=currentWebUIId;
+ const restoreScrollY=window.scrollY;
  const schema=await (await fetch('/api/webui/schema')).json();
  app.innerHTML='';
  const hosts=[...(schema.hosts||[])].sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
@@ -101,6 +119,7 @@ async function load(){
  const panels=document.createElement('div');
  let activeTabId='';
  const setActive=(webUIId)=>{
+  currentWebUIId=webUIId;
   activeTabId=webUIId;
   for(const tab of tabs.querySelectorAll('[data-webui-id]')){
    tab.classList.toggle('active',tab.dataset.webuiId===webUIId);
@@ -128,7 +147,8 @@ async function load(){
   panels.append(panel);
  }
  app.append(tabs,panels);
- setActive(hosts[0].webUIId);
+ setActive(hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
+ requestAnimationFrame(()=>window.scrollTo(0,restoreScrollY));
 }
 load();
 </script>

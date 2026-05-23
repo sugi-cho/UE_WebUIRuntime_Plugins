@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "WebUIComponentBase.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIButtonClicked, FName, ButtonId);
+
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
 class WEBUIRUNTIME_API UWebUIComponentBase : public UActorComponent
 {
@@ -58,6 +60,9 @@ protected:
 
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI", DisplayName="OnWebUIButtonClicked")
 	void K2_OnWebUIButtonClicked(FName ButtonId);
+
+	UPROPERTY(BlueprintAssignable, Category="WebUI")
+	FOnWebUIButtonClicked OnWebUIButtonClicked;
 
 private:
 	UPROPERTY(EditAnywhere, Category="WebUI")

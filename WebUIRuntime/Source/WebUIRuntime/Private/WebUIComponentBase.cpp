@@ -66,6 +66,7 @@ void UWebUIComponentBase::NotifyWebUIColorChanged(FName PropertyName, FLinearCol
 void UWebUIComponentBase::NotifyWebUIButtonClicked(FName ButtonId)
 {
 	HandleWebUIButtonClicked(ButtonId);
+	OnWebUIButtonClicked.Broadcast(ButtonId);
 	K2_OnWebUIButtonClicked(ButtonId);
 }
 
