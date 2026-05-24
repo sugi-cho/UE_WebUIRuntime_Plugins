@@ -1,6 +1,7 @@
 #include "WebUIHostComponent.h"
 
 #include "WebUIHostActor.h"
+#include "WebUIRuntime.h"
 #include "WebUIRuntimeSubsystem.h"
 #include "WebUIRuntimeSettings.h"
 
@@ -24,6 +25,22 @@ void UWebUIHostComponent::PostLoad()
 void UWebUIHostComponent::OnRegister()
 {
 	RefreshOwnerSettingsMode();
+
+	if (AActor* Owner = GetOwner())
+	{
+		if (!Owner->IsTemplate())
+		{
+			TInlineComponentArray<UWebUIHostComponent*> HostComponents;
+			Owner->GetComponents(HostComponents);
+			if (HostComponents.Num() > 1 && HostComponents[0] != this)
+			{
+				UE_LOG(LogWebUIRuntime, Warning, TEXT("Duplicate WebUIHostComponent on '%s' was removed."), *Owner->GetName());
+				DestroyComponent();
+				return;
+			}
+		}
+	}
+
 	Super::OnRegister();
 }
 
@@ -41,6 +58,10 @@ void UWebUIHostComponent::BeginPlay()
 	if (UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem())
 	{
 		Runtime->RegisterHost(this);
+		if (IsAutoSaveChangedValuesEnabled() && ShouldAutoLoadSavedValues())
+		{
+			Runtime->LoadPersistedState(this);
+		}
 		const bool bShouldAutoStart = HostActor ? HostActor->ShouldAutoStartServer() : bAutoStartServer;
 		if (bShouldAutoStart)
 		{
@@ -53,6 +74,10 @@ void UWebUIHostComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem())
 	{
+		if (IsAutoSaveChangedValuesEnabled())
+		{
+			Runtime->SavePersistedState(this);
+		}
 		Runtime->UnregisterHost(this);
 	}
 
@@ -64,6 +89,10 @@ bool UWebUIHostComponent::StartWebUIServer()
 	if (UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem())
 	{
 		Runtime->RegisterHost(this);
+		if (IsAutoSaveChangedValuesEnabled() && ShouldAutoLoadSavedValues())
+		{
+			Runtime->LoadPersistedState(this);
+		}
 		return Runtime->StartServerFromSettings();
 	}
 	return false;
@@ -174,6 +203,24 @@ void UWebUIHostComponent::NotifyWebUIButtonClicked(FName ButtonId)
 	{
 		HostActor->NotifyWebUIButtonClicked(ButtonId);
 	}
+}
+
+bool UWebUIHostComponent::IsAutoSaveChangedValuesEnabled() const
+{
+	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
+	{
+		return HostActor->bAutoSaveChangedValues;
+	}
+	return bAutoSaveChangedValues;
+}
+
+bool UWebUIHostComponent::ShouldAutoLoadSavedValues() const
+{
+	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
+	{
+		return HostActor->bAutoLoadSavedValues;
+	}
+	return bAutoLoadSavedValues;
 }
 
 UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const

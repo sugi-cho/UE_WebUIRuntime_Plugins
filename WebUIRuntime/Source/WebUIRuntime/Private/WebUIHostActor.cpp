@@ -107,4 +107,6 @@ void AWebUIHostActor::SyncHostComponent() const
 	WebUIHostComponent->bAutoStartServer = bAutoStartServer;
 	WebUIHostComponent->WebUIId = WebUIId;
 	WebUIHostComponent->Description = Description;
+	WebUIHostComponent->bAutoSaveChangedValues = bAutoSaveChangedValues;
+	WebUIHostComponent->bAutoLoadSavedValues = bAutoLoadSavedValues;
 }

@@ -2,6 +2,7 @@
 
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GeneralProjectSettings.h"
 #include "Misc/PackageName.h"
@@ -22,6 +23,7 @@
 #include "WebUIComponentBase.h"
 #include "WebUIHostActor.h"
 #include "WebUIHostComponent.h"
+#include "WebUIRuntimeSaveGame.h"
 #include "WebUIRuntimeSettings.h"
 #include "WebUIRuntime.h"
 
@@ -1135,7 +1137,7 @@ UActorComponent* UWebUIRuntimeSubsystem::FindComponent(const FString& WebUIId, c
 	return nullptr;
 }
 
-bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError)
+bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange)
 {
 	FProperty* Property = FindFProperty<FProperty>(Owner->GetClass(), *PropertyName);
 	if (!Property || !IsWebUIProperty(Property))
@@ -1348,6 +1350,11 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 
 	NotifyPropertyChanged(*PropertyName);
 
+	if (bPersistAfterChange && Host && Host->IsAutoSaveChangedValuesEnabled())
+	{
+		SavePersistedState(Host);
+	}
+
 	return true;
 }
 
@@ -1489,4 +1496,158 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::ParseRequestJson(const FHttpServ
 		return nullptr;
 	}
 	return BodyObject;
+}
+
+bool UWebUIRuntimeSubsystem::SerializeJsonValue(const TSharedPtr<FJsonValue>& Value, FString& OutJson) const
+{
+	if (!Value.IsValid())
+	{
+		return false;
+	}
+
+	TSharedRef<FJsonObject> Wrapper = MakeShared<FJsonObject>();
+	Wrapper->SetField(TEXT("value"), Value);
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutJson);
+	return FJsonSerializer::Serialize(Wrapper, Writer);
+}
+
+TSharedPtr<FJsonValue> UWebUIRuntimeSubsystem::DeserializeJsonValue(const FString& Json, FString& OutError) const
+{
+	TSharedPtr<FJsonObject> Wrapper;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+	if (!FJsonSerializer::Deserialize(Reader, Wrapper) || !Wrapper.IsValid())
+	{
+		OutError = TEXT("Invalid saved JSON");
+		return nullptr;
+	}
+
+	TSharedPtr<FJsonValue> Value = Wrapper->TryGetField(TEXT("value"));
+	if (!Value.IsValid())
+	{
+		OutError = TEXT("Missing saved value");
+		return nullptr;
+	}
+
+	return Value;
+}
+
+void UWebUIRuntimeSubsystem::SavePersistedState(UWebUIHostComponent* Host)
+{
+	if (!IsValid(Host) || !Host->IsAutoSaveChangedValuesEnabled() || !IsValid(Host->GetOwner()))
+	{
+		return;
+	}
+
+	AActor* Owner = Host->GetOwner();
+	const FString HostKey = Host->GetWebUIId();
+	if (HostKey.IsEmpty())
+	{
+		return;
+	}
+
+	UWebUIRuntimeSaveGame* SaveGame = nullptr;
+	if (UGameplayStatics::DoesSaveGameExist(TEXT("WebUIRuntime"), 0))
+	{
+		SaveGame = Cast<UWebUIRuntimeSaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("WebUIRuntime"), 0));
+	}
+	if (!SaveGame)
+	{
+		SaveGame = Cast<UWebUIRuntimeSaveGame>(UGameplayStatics::CreateSaveGameObject(UWebUIRuntimeSaveGame::StaticClass()));
+	}
+	if (!SaveGame)
+	{
+		return;
+	}
+
+	FWebUIRuntimeSavedHostState HostState;
+	auto AppendObjectState = [&](UObject* Object, const FString& OwnerType, const FString& ComponentId)
+	{
+		if (!IsValid(Object))
+		{
+			return;
+		}
+
+		for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (!IsWebUIProperty(Property))
+			{
+				continue;
+			}
+
+			TSharedPtr<FJsonValue> JsonValue = PropertyToJsonValue(Property, Object);
+			FString ValueJson;
+			if (!SerializeJsonValue(JsonValue, ValueJson))
+			{
+				continue;
+			}
+
+			FWebUIRuntimeSavedProperty Entry;
+			Entry.OwnerType = OwnerType;
+			Entry.ComponentId = ComponentId;
+			Entry.PropertyName = Property->GetName();
+			Entry.ValueJson = MoveTemp(ValueJson);
+			HostState.Properties.Add(MoveTemp(Entry));
+		}
+	};
+
+	AppendObjectState(Owner, TEXT("actor"), FString());
+
+	TArray<UActorComponent*> Components;
+	Owner->GetComponents(Components);
+	for (UActorComponent* Component : Components)
+	{
+		if (!IsValid(Component) || Cast<UWebUIHostComponent>(Component))
+		{
+			continue;
+		}
+		AppendObjectState(Component, TEXT("component"), Component->GetName());
+	}
+
+	SaveGame->HostStates.Add(HostKey, MoveTemp(HostState));
+	UGameplayStatics::SaveGameToSlot(SaveGame, TEXT("WebUIRuntime"), 0);
+}
+
+void UWebUIRuntimeSubsystem::LoadPersistedState(UWebUIHostComponent* Host)
+{
+	if (!IsValid(Host) || !Host->IsAutoSaveChangedValuesEnabled() || !IsValid(Host->GetOwner()))
+	{
+		return;
+	}
+
+	const FString HostKey = Host->GetWebUIId();
+	if (HostKey.IsEmpty())
+	{
+		return;
+	}
+
+	UWebUIRuntimeSaveGame* SaveGame = Cast<UWebUIRuntimeSaveGame>(UGameplayStatics::LoadGameFromSlot(TEXT("WebUIRuntime"), 0));
+	if (!SaveGame)
+	{
+		return;
+	}
+
+	const FWebUIRuntimeSavedHostState* HostState = SaveGame->HostStates.Find(HostKey);
+	if (!HostState)
+	{
+		return;
+	}
+
+	for (const FWebUIRuntimeSavedProperty& Entry : HostState->Properties)
+	{
+		FString Error;
+		TSharedPtr<FJsonValue> Value = DeserializeJsonValue(Entry.ValueJson, Error);
+		if (!Value.IsValid())
+		{
+			continue;
+		}
+
+		UObject* OwnerObject = FindPropertyOwner(HostKey, Entry.OwnerType, Entry.ComponentId, Host);
+		if (!OwnerObject)
+		{
+			continue;
+		}
+
+		SetPropertyFromJson(OwnerObject, Host, Entry.PropertyName, Value, Error, false);
+	}
 }

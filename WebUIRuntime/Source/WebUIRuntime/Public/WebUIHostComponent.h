@@ -66,14 +66,23 @@ public:
 	void NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value);
 	void NotifyWebUIButtonClicked(FName ButtonId);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(EditCondition="!bUseActorSettings", EditConditionHides))
+	bool IsAutoSaveChangedValuesEnabled() const;
+	bool ShouldAutoLoadSavedValues() const;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
 	bool bAutoStartServer = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(EditCondition="!bUseActorSettings", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
 	FString WebUIId;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true, EditCondition="!bUseActorSettings", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true))
 	FString Description;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	bool bAutoSaveChangedValues = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	bool bAutoLoadSavedValues = true;
 
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
 	FOnWebUIHostPropertyChanged OnWebUIPropertyChanged;

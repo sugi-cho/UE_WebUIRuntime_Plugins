@@ -37,6 +37,9 @@ public:
 	UFUNCTION(BlueprintPure, Category="WebUI")
 	int32 GetServerPort() const;
 
+	void SavePersistedState(UWebUIHostComponent* Host);
+	void LoadPersistedState(UWebUIHostComponent* Host);
+
 private:
 	FString GetWebUITitle() const;
 	bool StartServer(int32 Port);
@@ -51,11 +54,13 @@ private:
 	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
 
-	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError);
+	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange = true);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
 	FString GetPropertyWebUIType(FProperty* Property) const;
 	bool IsWebUIProperty(FProperty* Property) const;
 	void ApplyHttpServerBindAddressSetting() const;
+	bool SerializeJsonValue(const TSharedPtr<FJsonValue>& Value, FString& OutJson) const;
+	TSharedPtr<FJsonValue> DeserializeJsonValue(const FString& Json, FString& OutError) const;
 
 	TUniquePtr<struct FHttpServerResponse> MakeJsonResponse(const TSharedRef<FJsonObject>& Object) const;
 	TSharedPtr<FJsonObject> ParseRequestJson(const FHttpServerRequest& Request, FString& OutError) const;

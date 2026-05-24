@@ -61,6 +61,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true))
 	FString Description;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	bool bAutoSaveChangedValues = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	bool bAutoLoadSavedValues = true;
+
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
 	FOnWebUIHostActorButtonClicked OnWebUIButtonClicked;
 
