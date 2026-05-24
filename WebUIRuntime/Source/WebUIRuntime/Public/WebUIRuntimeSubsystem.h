@@ -38,6 +38,7 @@ public:
 	int32 GetServerPort() const;
 
 private:
+	FString GetWebUITitle() const;
 	bool StartServer(int32 Port);
 	bool HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);

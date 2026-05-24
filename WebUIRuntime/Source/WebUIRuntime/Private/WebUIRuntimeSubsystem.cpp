@@ -3,6 +3,8 @@
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "GeneralProjectSettings.h"
+#include "Misc/PackageName.h"
 #include "HttpPath.h"
 #include "HttpServerModule.h"
 #include "HttpServerRequest.h"
@@ -12,6 +14,11 @@
 #include "Math/Color.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Serialization/JsonSerializer.h"
+#if WITH_EDITOR
+#include "Kismet2/BlueprintEditorUtils.h"
+#include "K2Node_EditablePinBase.h"
+#include "Engine/Blueprint.h"
+#endif
 #include "WebUIComponentBase.h"
 #include "WebUIHostActor.h"
 #include "WebUIHostComponent.h"
@@ -29,7 +36,7 @@ namespace
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>UE WebUI Runtime</title>
+<title>__WEBUI_TITLE__</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:24px;background:#101216;color:#e9edf2}
 h1{margin:0 0 16px}
@@ -67,7 +74,7 @@ button.webui-button:disabled{opacity:.72;cursor:default}
 </style>
 </head>
 <body>
-<h1>UE WebUI Runtime</h1>
+<h1>__WEBUI_TITLE__</h1>
 <main id="app"></main>
 <script>
 const app=document.getElementById('app');
@@ -354,7 +361,7 @@ function renderButtonRow(host,ownerType,componentId,buttons){
  for(const b of buttons||[]){
   const btn=document.createElement('button');
   btn.className='webui-button';
-  btn.textContent=b.id;
+  btn.textContent=b.label || b.id;
   btn.onclick=async()=>{
    btn.classList.add('pressed');
    btn.disabled=true;
@@ -419,12 +426,15 @@ async function load(){
   panel.className='panel';
   panel.dataset.webuiPanel=host.webUIId;
   panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
-  if((host.actorProperties||[]).length || (host.hostButtons||[]).length){
+  if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
    const actorSection=document.createElement('section');
    actorSection.className='component';
    actorSection.innerHTML='<h3>Actor</h3>';
    if((host.actorProperties||[]).length){
     actorSection.append(renderProperties(host,'actor','',host.actorProperties));
+   }
+   if((host.actorButtons||[]).length){
+    actorSection.append(renderButtonRow(host,'actor','',host.actorButtons));
    }
    if((host.hostButtons||[]).length){
     actorSection.append(renderButtonRow(host,'host','',host.hostButtons));
@@ -452,6 +462,20 @@ load();
 		Object->SetBoolField(TEXT("ok"), false);
 		Object->SetStringField(TEXT("error"), Error);
 		return Object;
+	}
+
+	bool IsWebUICategory(const FString& Category)
+	{
+		FString Normalized = Category;
+		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
+		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsWebUIButtonCategory(const FString& Category)
+	{
+		FString Normalized = Category;
+		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
+		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
 	}
 
 	TOptional<double> ReadMetaNumber(const FProperty* Property, const TCHAR* Key)
@@ -487,6 +511,141 @@ load();
 		if (SliderMin.IsSet()) PropertyObject->SetNumberField(TEXT("sliderMin"), SliderMin.GetValue());
 		if (SliderMax.IsSet()) PropertyObject->SetNumberField(TEXT("sliderMax"), SliderMax.GetValue());
 		if (Delta.IsSet()) PropertyObject->SetNumberField(TEXT("step"), Delta.GetValue());
+	}
+
+	TSharedRef<FJsonObject> MakeButtonObject(const FString& Id, const FString& Label, const FString& Kind)
+	{
+		TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
+		ButtonObject->SetStringField(TEXT("id"), Id);
+		ButtonObject->SetStringField(TEXT("label"), Label);
+		ButtonObject->SetStringField(TEXT("kind"), Kind);
+		return ButtonObject;
+	}
+
+	bool IsWebUIButtonFunction(const UFunction* Function)
+	{
+		if (!Function || Function->NumParms != 0 || !Function->HasMetaData(TEXT("Category")))
+		{
+			return false;
+		}
+
+		if (!IsWebUIButtonCategory(Function->GetMetaData(TEXT("Category"))))
+		{
+			return false;
+		}
+
+		static const TSet<FName> IgnoredButtonFunctions = {
+			TEXT("RegisterWebUIButton"),
+			TEXT("UnregisterWebUIButton"),
+			TEXT("ClearWebUIButtons"),
+			TEXT("ClearAllButtons"),
+			TEXT("StartWebUIServer"),
+			TEXT("StopWebUIServer")
+		};
+
+		return !IgnoredButtonFunctions.Contains(Function->GetFName());
+	}
+
+	void AddButtonIfMissing(TSet<FName>& SeenButtons, TArray<TSharedPtr<FJsonValue>>& ButtonValues, const FName ButtonId, const FString& Label, const FString& Kind)
+	{
+		if (ButtonId.IsNone() || SeenButtons.Contains(ButtonId))
+		{
+			return;
+		}
+
+		SeenButtons.Add(ButtonId);
+		ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ButtonId.ToString(), Label, Kind)));
+	}
+
+	void AppendWebUIButtonFunctions(UObject* Owner, TArray<TSharedPtr<FJsonValue>>& ButtonValues)
+	{
+		if (!IsValid(Owner))
+		{
+			return;
+		}
+
+		TSet<FName> SeenButtons;
+		for (TFieldIterator<UFunction> It(Owner->GetClass()); It; ++It)
+		{
+			UFunction* Function = *It;
+			if (!IsWebUIButtonFunction(Function))
+			{
+				continue;
+			}
+
+			const FString Label = Function->GetDisplayNameText().ToString();
+			AddButtonIfMissing(
+				SeenButtons,
+				ButtonValues,
+				Function->GetFName(),
+				Label.IsEmpty() ? Function->GetName() : Label,
+				TEXT("function"));
+		}
+
+#if WITH_EDITOR
+		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Owner->GetClass()->ClassGeneratedBy))
+		{
+			for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+			{
+				if (!Graph)
+				{
+					continue;
+				}
+
+				FKismetUserDeclaredFunctionMetadata* MetaData = FBlueprintEditorUtils::GetGraphFunctionMetaData(Graph);
+				if (!MetaData || !IsWebUIButtonCategory(MetaData->Category.ToString()))
+				{
+					continue;
+				}
+
+				AddButtonIfMissing(SeenButtons, ButtonValues, Graph->GetFName(), Graph->GetName(), TEXT("blueprintFunction"));
+			}
+		}
+#endif
+	}
+
+	bool InvokeWebUIButtonFunction(UObject* Owner, const FName ButtonId, FString& OutError)
+	{
+		if (!IsValid(Owner) || ButtonId.IsNone())
+		{
+			OutError = TEXT("Button not found");
+			return false;
+		}
+
+		UFunction* Function = Owner->FindFunction(ButtonId);
+		if (IsWebUIButtonFunction(Function))
+		{
+			Owner->ProcessEvent(Function, nullptr);
+			return true;
+		}
+
+#if WITH_EDITOR
+		if (const UBlueprint* Blueprint = Cast<UBlueprint>(Owner->GetClass()->ClassGeneratedBy))
+		{
+			for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+			{
+				if (!Graph || Graph->GetFName() != ButtonId)
+				{
+					continue;
+				}
+
+				FKismetUserDeclaredFunctionMetadata* MetaData = FBlueprintEditorUtils::GetGraphFunctionMetaData(Graph);
+				if (MetaData && IsWebUIButtonCategory(MetaData->Category.ToString()))
+				{
+					Owner->ProcessEvent(Function, nullptr);
+					return true;
+				}
+				break;
+			}
+		}
+#endif
+
+		if (!IsWebUIButtonFunction(Function))
+		{
+			OutError = TEXT("Button not found");
+			return false;
+		}
+		return false;
 	}
 
 	void AddEnumSchemaFields(const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
@@ -617,9 +776,47 @@ void UWebUIRuntimeSubsystem::ApplyHttpServerBindAddressSetting() const
 	GConfig->Flush(false, GEngineIni);
 }
 
+FString UWebUIRuntimeSubsystem::GetWebUITitle() const
+{
+	FString ProjectName;
+	if (const UGeneralProjectSettings* ProjectSettings = GetDefault<UGeneralProjectSettings>())
+	{
+		ProjectName = ProjectSettings->ProjectName.TrimStartAndEnd();
+	}
+
+	FString LevelName;
+	for (UWebUIHostComponent* Host : Hosts)
+	{
+		if (!IsValid(Host) || !IsValid(Host->GetOwner()))
+		{
+			continue;
+		}
+
+		if (const UWorld* World = Host->GetOwner()->GetWorld())
+		{
+			LevelName = FPackageName::GetShortName(UWorld::RemovePIEPrefix(World->GetMapName()));
+			break;
+		}
+	}
+
+	if (LevelName.IsEmpty())
+	{
+		LevelName = TEXT("Level");
+	}
+
+	if (ProjectName.IsEmpty())
+	{
+		return LevelName;
+	}
+
+	return FString::Printf(TEXT("%s-%s"), *ProjectName, *LevelName);
+}
+
 bool UWebUIRuntimeSubsystem::HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
 {
-	OnComplete(FHttpServerResponse::Create(FString(WebUIHtml), HtmlContentType));
+	FString Html(WebUIHtml);
+	Html.ReplaceInline(TEXT("__WEBUI_TITLE__"), *GetWebUITitle(), ESearchCase::CaseSensitive);
+	OnComplete(FHttpServerResponse::Create(MoveTemp(Html), HtmlContentType));
 	return true;
 }
 
@@ -692,6 +889,15 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 	}
 	else if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
 	{
+		FString FunctionError;
+		if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+		{
+			TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetBoolField(TEXT("ok"), true);
+			OnComplete(MakeJsonResponse(Response));
+			return true;
+		}
+
 		if (AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(Owner))
 		{
 			if (!HostActor->GetWebUIButtons().Contains(ButtonId))
@@ -709,6 +915,15 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 	}
 	else
 	{
+		FString FunctionError;
+		if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+		{
+			TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+			Response->SetBoolField(TEXT("ok"), true);
+			OnComplete(MakeJsonResponse(Response));
+			return true;
+		}
+
 		UWebUIComponentBase* Component = Cast<UWebUIComponentBase>(Owner);
 		if (!Component || !Component->GetWebUIButtons().Contains(ButtonId))
 		{
@@ -743,14 +958,13 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		TArray<TSharedPtr<FJsonValue>> HostButtonValues;
 		for (const FName Button : Host->GetWebUIButtons())
 		{
-			TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
-			ButtonObject->SetStringField(TEXT("id"), Button.ToString());
-			HostButtonValues.Add(MakeShared<FJsonValueObject>(ButtonObject));
+			HostButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"))));
 		}
 		HostObject->SetArrayField(TEXT("hostButtons"), HostButtonValues);
 		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner())))
 		{
 			HostObject->SetArrayField(TEXT("actorProperties"), ActorObject->GetArrayField(TEXT("properties")));
+			HostObject->SetArrayField(TEXT("actorButtons"), ActorObject->GetArrayField(TEXT("buttons")));
 		}
 
 		TArray<TSharedPtr<FJsonValue>> ComponentValues;
@@ -807,8 +1021,12 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 
+	TArray<TSharedPtr<FJsonValue>> ButtonValues;
+	AppendWebUIButtonFunctions(Actor, ButtonValues);
+
 	TSharedRef<FJsonObject> ActorObject = MakeShared<FJsonObject>();
 	ActorObject->SetArrayField(TEXT("properties"), PropertyValues);
+	ActorObject->SetArrayField(TEXT("buttons"), ButtonValues);
 	return ActorObject;
 }
 
@@ -844,13 +1062,12 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	}
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
+	AppendWebUIButtonFunctions(Component, ButtonValues);
 	if (const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
 	{
 		for (const FName Button : WebUIComponent->GetWebUIButtons())
 		{
-			TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
-			ButtonObject->SetStringField(TEXT("id"), Button.ToString());
-			ButtonValues.Add(MakeShared<FJsonValueObject>(ButtonObject));
+			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"))));
 		}
 	}
 
@@ -1242,13 +1459,6 @@ FString UWebUIRuntimeSubsystem::GetPropertyWebUIType(FProperty* Property) const
 
 bool UWebUIRuntimeSubsystem::IsWebUIProperty(FProperty* Property) const
 {
-	auto IsWebUICategory = [](const FString& Category)
-	{
-		FString Normalized = Category;
-		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
-		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
-	};
-
 	return Property
 		&& GetPropertyWebUIType(Property) != TEXT("unsupported")
 		&& (Property->HasMetaData(TEXT("WebUI")) || IsWebUICategory(Property->GetMetaData(TEXT("Category"))));

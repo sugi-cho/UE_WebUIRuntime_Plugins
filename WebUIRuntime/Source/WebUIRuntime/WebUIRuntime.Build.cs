@@ -12,6 +12,7 @@ public class WebUIRuntime : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"EngineSettings",
 				"Json",
 				"DeveloperSettings"
 			}
@@ -24,5 +25,16 @@ public class WebUIRuntime : ModuleRules
 				"JsonUtilities"
 			}
 		);
+
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"UnrealEd",
+					"BlueprintGraph"
+				}
+			);
+		}
 	}
 }
