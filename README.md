@@ -18,6 +18,7 @@
 3. Project Settings の `Plugins > Web UI Runtime` で `Port` を設定します。
 4. 同じ画面の `Allow Remote Access` を有効にすると、LAN 内の端末からもアクセスできます。
 5. `WebUIHostComponent` を持つ Actor を配置して Web UI を起動します。
+6. UE 内に埋め込み表示したい場合は、`Web Browser Widget` プラグインも有効化します。
 
 複数の Actor が `WebUIHostComponent` を持つ場合、Web UI は `WebUIId` ごとのタブで切り替えます。
 タブ名は `WebUIId` を使います。
@@ -31,6 +32,75 @@
 - `WebUIId` が未設定なら Actor 名を使います。
 - ポートは個別設定ではなく、Project Settings の 1 設定を使います。
 - `Allow Remote Access` を有効にすると、HTTPServer の bind を `any` にして LAN 内から見えるようにします。
+
+## UE 内 Widget 表示
+
+`UWebUIRuntimeBrowserWidget` を使うと、既存の WebUI を `WebBrowserWidget` 経由で UE 内の UMG として表示できます。
+
+### 配置方法
+
+1. Widget Blueprint を作成し、親クラスに `WebUIRuntimeBrowserWidget` を指定します。
+2. そのまま配置しても動作します。必要なら BP 側で `WebBrowser` を配置して見た目を調整できます。
+3. `bAutoLoadOnConstruct=true` の場合、Construct 後に自動で `LoadWebUI()` します。
+4. 手動で再読込したい場合は `ReloadWebUI()` を呼びます。
+
+### 主な Blueprint API
+
+- `LoadWebUI()`
+- `ReloadWebUI()`
+- `SetWebUIId(FString InWebUIId)`
+- `SetUseEmbedMode(bool bInUseEmbedMode)`
+- `SetOverrideURL(FString InOverrideURL)`
+- `GetWebUIURL()`
+
+### 主なプロパティ
+
+- `bAutoLoadOnConstruct`
+- `bUseEmbedMode`
+- `bSupportsTransparency`
+- `WebUIId`
+- `AdditionalQueryString`
+- `OverrideURL`
+- `bPreferLocalhost`
+
+### URL 生成
+
+- `OverrideURL` が空でない場合はそれを優先します。
+- 通常は `http://127.0.0.1:{Port}/webui/` を使います。
+- `bUseEmbedMode=true` の場合、`embed=1` を付けます。
+- `WebUIId` がある場合、`webuiId={WebUIId}` を付けます。
+- `AdditionalQueryString` がある場合、そのまま追加します。
+
+URL 例:
+
+- `http://127.0.0.1:8080/webui/?embed=1`
+- `http://127.0.0.1:8080/webui/?embed=1&webuiId=LightController`
+- `http://127.0.0.1:8080/webui/?embed=1&webuiId=LightController&compact=1`
+
+### `?embed=1` の意味
+
+- UE 内埋め込み表示向けの軽量レイアウトに切り替えます。
+- `html` / `body` の余白を抑え、背景を透明寄りにします。
+- 外部ブラウザ向けの大きなヘッダーや余白を非表示にします。
+- Property UI と Button UI はそのまま維持します。
+
+### 透明背景
+
+- `bSupportsTransparency` を有効にすると、`WebBrowserWidget` 側で透過表示を試みます。
+- `embed=1` 時は HTML 側も透明背景寄りにします。
+- ただし、プラットフォームやレンダラー設定によっては完全な透過にならない場合があります。
+
+### サーバー起動順
+
+- Widget の `NativeConstruct` 時点で HTTPServer が未起動でも、クラッシュしないようにしています。
+- 未起動時はログを出し、数回だけ再試行します。
+- 後から `ReloadWebUI()` を呼べば再接続できます。
+
+### 外部ブラウザとの使い分け
+
+- 外部ブラウザ向けの通常表示はそのまま残っています。
+- `embed=1` は UMG 内表示専用の追加モードです。
+- `webuiId` クエリを付けると、初期表示タブを指定できます。
 
 ## `WebUIHostActor` について
 
@@ -57,6 +127,38 @@
 5. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
 6. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
 7. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
+
+### 対応型
+
+`WebUIRuntime` が現在対応している `UPROPERTY` の型は次のとおりです。
+
+- `bool`
+- `int32`
+- `float` / `double`
+- `FString` / `FName` / `FText`
+- `enum`
+- `FVector`
+- `FRotator`
+- `FColor`
+- `FLinearColor`
+
+JSON での入力例:
+
+```json
+{
+  "bool": true,
+  "int32": 42,
+  "float": 1.5,
+  "string": "hello",
+  "enum": "ValueName",
+  "vector": { "x": 1, "y": 2, "z": 3 },
+  "rotator": { "pitch": 10, "yaw": 20, "roll": 30 },
+  "color": { "r": 1, "g": 0.5, "b": 0, "a": 1 },
+  "linearColor": { "r": 0.2, "g": 0.4, "b": 0.6, "a": 1 }
+}
+```
+
+`TArray` / `TMap` / `TSet` / 任意の `UStruct` / オブジェクト参照は、この実装では対象外です。
 
 ```cpp
 UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
@@ -90,3 +192,10 @@ Button は Property と同じく WebUI に表示され、クリックで UE 側�
 - 公式 SDK はこちらです: [NDI Unreal Engine SDK](https://ndi.video/for-developers/ndi-unreal-engine-sdk/)
 - このリポジトリでは UE 5.7 向けの `NDIIOPlugin` を想定しています。
 - 5.7 以外の Unreal Engine では、そのままでは動作しない可能性があります。
+
+## 注意事項
+
+- `Web Browser Widget` プラグインが無効だと UE 内表示は利用できません。
+- Shipping ビルドや各プラットフォームでの WebBrowserWidget の挙動は、別途検証が必要です。
+- `Allow Remote Access` を有効にすると、LAN 内の端末から操作 API にアクセスできます。運用環境ではアクセス制御に注意してください。
+- この変更では `WebUI_NDI` の既存挙動は変更していません。
