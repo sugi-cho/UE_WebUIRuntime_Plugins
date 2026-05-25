@@ -13,7 +13,7 @@ public:
 	UWebUINDIComponent();
 	virtual void BeginPlay() override;
 
-	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
+	UFUNCTION(BlueprintCallable, Category="WebUI|NDI", DisplayName="Refresh")
 	void RefreshNDISources();
 
 	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
@@ -22,13 +22,16 @@ public:
 	UFUNCTION(BlueprintPure, Category="WebUI|NDI")
 	const TArray<FString>& GetAvailableNDISources() const;
 
+	UFUNCTION(BlueprintPure, Category="WebUI|NDI")
+	void GetAvailableNDISourceOptions(TArray<FString>& OutSources) const;
+
 	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
 	void SelectNDISource(const FString& SourceName);
 
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI|NDI", DisplayName="OnWebUINDISourceSelected")
 	void K2_OnWebUINDISourceSelected(const FString& SourceName);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI", meta=(WebUI, WebUIOptions="GetAvailableNDISourceOptions", WebUIOnChanged="SelectNDISource", WebUIActions="RefreshNDISources"))
 	FString SelectedNDISource;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")

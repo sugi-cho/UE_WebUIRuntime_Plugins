@@ -7,7 +7,7 @@
 	"Category": "Web UI",
 	"CreatedBy": "sugi-cho",
 	"EnabledByDefault": false,
-	"CanContainContent": false,
+	"CanContainContent": true,
 	"Modules": [
 		{
 			"Name": "WebUI_NDI",

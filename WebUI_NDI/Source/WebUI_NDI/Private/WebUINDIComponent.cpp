@@ -41,6 +41,11 @@ const TArray<FString>& UWebUINDIComponent::GetAvailableNDISources() const
 	return AvailableNDISources;
 }
 
+void UWebUINDIComponent::GetAvailableNDISourceOptions(TArray<FString>& OutSources) const
+{
+	OutSources = AvailableNDISources;
+}
+
 void UWebUINDIComponent::SelectNDISource(const FString& SourceName)
 {
 	SelectedNDISource = SourceName;
@@ -65,9 +70,4 @@ void UWebUINDIComponent::HandleWebUIButtonClicked(FName ButtonId)
 void UWebUINDIComponent::SyncWebUIButtonList()
 {
 	ClearWebUIButtons();
-	RegisterWebUIButton(TEXT("RefreshNDISources"));
-	for (const FString& SourceName : AvailableNDISources)
-	{
-		RegisterWebUIButton(FName(*SourceName));
-	}
 }
