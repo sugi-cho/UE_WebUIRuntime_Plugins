@@ -40,20 +40,49 @@ namespace
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__WEBUI_TITLE__</title>
 <style>
-body{font-family:system-ui,sans-serif;margin:24px;background:#101216;color:#e9edf2}
-h1{margin:0 0 16px}
-.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid #2d3440}
-.tab{border:1px solid #2d3440;border-bottom:none;background:#12161d;color:#cfd6df;padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
-.tab.active{background:#171b22;color:#ffffff;border-color:#5b7898;border-bottom:1px solid #171b22;z-index:1}
+:root{
+ --page-bg: rgba(16,18,22,0.98);
+ --shell-bg: #101216;
+ --panel-bg: #171b22;
+ --panel-bg-embed: rgba(23,27,34,0.72);
+ --border: #2d3440;
+ --border-strong: #5b7898;
+ --button-bg: #233247;
+ --button-bg-pressed: #4b6f95;
+ --text: #e9edf2;
+ --muted: #cfd6df;
+ --page-padding: 24px;
+ --content-gap: 16px;
+ --panel-radius: 8px;
+}
+html,body{margin:0;background:transparent;overflow:auto}
+body{font-family:system-ui,sans-serif;color:var(--text)}
+body.theme-light{--page-bg:rgba(248,250,252,0.98);--shell-bg:#f8fafc;--panel-bg:#ffffff;--panel-bg-embed:rgba(255,255,255,0.74);--border:#d8e0ea;--border-strong:#7aa3d8;--button-bg:#e6edf6;--button-bg-pressed:#bfd6ef;--text:#101216;--muted:#4b5563}
+body.theme-dark{--page-bg:rgba(16,18,22,0.98);--shell-bg:#101216;--panel-bg:#171b22;--panel-bg-embed:rgba(23,27,34,0.72);--border:#2d3440;--border-strong:#5b7898;--button-bg:#233247;--button-bg-pressed:#4b6f95;--text:#e9edf2;--muted:#cfd6df}
+body.embed{overflow:hidden}
+body.compact{--page-padding:12px;--content-gap:10px}
+.page-shell{min-height:100vh;box-sizing:border-box;padding:var(--page-padding);background:var(--shell-bg)}
+body.embed .page-shell{min-height:100vh;padding:0;background:transparent}
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:0 0 var(--content-gap)}
+.page-title{margin:0}
+.external-link{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--muted);border:1px solid var(--border);background:rgba(255,255,255,.02);padding:8px 12px;border-radius:999px}
+.external-link:hover{color:var(--text);border-color:var(--border-strong)}
+body.embed .page-header{display:none}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid var(--border)}
+.tab{border:1px solid var(--border);border-bottom:none;background:var(--button-bg);color:var(--muted);padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
+.tab.active{background:var(--panel-bg);color:var(--text);border-color:var(--border-strong);border-bottom:1px solid var(--panel-bg);z-index:1}
+body.embed .tab.active{border-bottom-color:transparent}
 .tab:not(.active){opacity:.9}
-.panel{display:none;border:1px solid #2d3440;border-top:none;border-radius:0 8px 8px 8px;padding:16px;margin:0 0 16px;background:#171b22}
+.panel{display:none;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);padding:16px;margin:0 0 var(--content-gap);background:var(--panel-bg)}
+body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%) blur(4px)}
 .panel.active{display:block}
-.host-meta{opacity:.78;margin-top:4px}
-.component{border-top:1px solid #2d3440;padding-top:12px;margin-top:12px}
+.host-meta{opacity:.78;margin-top:4px;white-space:pre-wrap}
+.component{border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
 label.property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
 .property-name{padding-top:2px;min-width:0}
 .property-control{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-start;min-width:0;width:100%}
-input,button,select{font:inherit;padding:8px;border-radius:6px;border:1px solid #3d4654;background:#0d1015;color:#e9edf2;box-sizing:border-box}
+input,button,select{font:inherit;padding:8px;border-radius:6px;border:1px solid var(--border);background:#0d1015;color:var(--text);box-sizing:border-box}
+body.theme-light input,body.theme-light button,body.theme-light select{background:#ffffff;color:var(--text)}
 input[type="text"],input[type="number"],select{width:100%;min-width:0}
 input[type="range"]{flex:1 1 240px;min-width:180px;padding:8px 0}
 .numeric-field{width:120px}
@@ -63,24 +92,49 @@ input[type="range"]{flex:1 1 240px;min-width:180px;padding:8px 0}
 .color-group{grid-template-columns:1fr}
 .linear-color-group{grid-template-columns:140px minmax(0,1fr)}
 .color-swatch,.linear-color-swatch{padding:8px;border-radius:6px;background:#0d1015}
+body.theme-light .color-swatch,body.theme-light .linear-color-swatch{background:#ffffff}
 .alpha-field{width:90px}
 .checkbox-field{margin-left:0}
 .range-field{flex:1 1 240px}
 .button-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
-button{cursor:pointer;background:#233247}
+button{cursor:pointer;background:var(--button-bg)}
 button.webui-button{min-width:120px;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease}
-button.webui-button.pressed{background:#4b6f95;border-color:#8ab1dc;transform:translateY(1px)}
+button.webui-button.pressed{background:var(--button-bg-pressed);border-color:#8ab1dc;transform:translateY(1px)}
 button.webui-button:disabled{opacity:.72;cursor:default}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
+body.compact .tabs{margin-top:0}
+body.compact .panel{padding:12px}
+body.compact label.property-row{margin:8px 0;grid-template-columns:150px minmax(0,1fr)}
 </style>
 </head>
-<body>
-<h1>__WEBUI_TITLE__</h1>
+<body class="theme-dark">
+<div class="page-shell">
+<header class="page-header">
+<h1 class="page-title">__WEBUI_TITLE__</h1>
+<a id="externalLink" class="external-link" href="#" target="_blank" rel="noopener noreferrer">Open external browser</a>
+</header>
 <main id="app"></main>
+</div>
 <script>
 const app=document.getElementById('app');
+const url=new URL(window.location.href);
+const params=url.searchParams;
+const externalLink=document.getElementById('externalLink');
 let currentWebUIId='';
+const initialWebUIId=params.get('webuiId') || '';
+const isEmbed=params.get('embed')==='1';
+const isCompact=params.get('compact')==='1';
+const theme=(params.get('theme')||'dark').toLowerCase();
+document.body.classList.toggle('embed',isEmbed);
+document.body.classList.toggle('compact',isCompact);
+document.body.classList.toggle('theme-light',theme==='light');
+document.body.classList.toggle('theme-dark',theme!=='light');
+if(externalLink){
+ const externalUrl=new URL(window.location.href);
+ externalUrl.searchParams.delete('embed');
+ externalLink.href=externalUrl.toString();
+}
 async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
 function numberOrNull(v){return typeof v==='number'&&Number.isFinite(v)?v:null;}
 function resolveNumericBounds(p){
@@ -126,6 +180,56 @@ function renderBoolProperty(host,ownerType,componentId,p){
 }
 function renderStringProperty(host,ownerType,componentId,p){
  const {label,control}=createRow(p);
+ if((p.options||[]).length){
+  const select=document.createElement('select');
+  select.style.flex='1 1 260px';
+  select.style.minWidth='180px';
+  select.style.width='auto';
+  const currentValue=String(p.value ?? '');
+  let hasSelection=false;
+  for(const option of p.options||[]){
+   const opt=document.createElement('option');
+   opt.value=option.value;
+   opt.textContent=option.label||option.value;
+   if(option.value===currentValue){
+    opt.selected=true;
+    hasSelection=true;
+   }
+   select.append(opt);
+  }
+  if(!hasSelection){
+   const opt=document.createElement('option');
+   opt.value='';
+   opt.textContent='Select...';
+   opt.selected=true;
+   select.prepend(opt);
+  }
+  select.onchange=()=>commitProperty(host,ownerType,componentId,p,select.value);
+  control.append(select);
+  if((p.actions||[]).length){
+   const actions=document.createElement('div');
+   actions.style.display='flex';
+   actions.style.flexWrap='wrap';
+   actions.style.gap='8px';
+   for(const action of p.actions||[]){
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.textContent=action.label || action.id;
+    btn.onclick=async()=>{
+     btn.disabled=true;
+     try{
+      await api('/api/webui/action',{webUIId:host.webUIId,ownerType,componentId,actionId:action.id});
+      await load();
+     }finally{
+      btn.disabled=false;
+     }
+    };
+    actions.append(btn);
+   }
+   control.append(actions);
+  }
+  return label;
+ }
  const input=document.createElement('input');
  input.type='text';
  input.value=p.value ?? '';
@@ -133,6 +237,8 @@ function renderStringProperty(host,ownerType,componentId,p){
  control.append(input);
  return label;
 }
+)HTML")
+TEXT(R"HTML(
 function renderNumericProperty(host,ownerType,componentId,p){
  const {label,control}=createRow(p);
  const current=numberOrNull(p.value) ?? 0;
@@ -404,10 +510,9 @@ async function load(){
  const tabs=document.createElement('div');
  tabs.className='tabs';
  const panels=document.createElement('div');
- let activeTabId='';
+ const requestedWebUIId=currentWebUIId || restoreWebUIId || initialWebUIId;
  const setActive=(webUIId)=>{
   currentWebUIId=webUIId;
-  activeTabId=webUIId;
   for(const tab of tabs.querySelectorAll('[data-webui-id]')){
    tab.classList.toggle('active',tab.dataset.webuiId===webUIId);
   }
@@ -449,7 +554,7 @@ async function load(){
   panels.append(panel);
  }
  app.append(tabs,panels);
- setActive(hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
+ setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
  requestAnimationFrame(()=>window.scrollTo(0,restoreScrollY));
 }
 load();
@@ -522,6 +627,14 @@ load();
 		ButtonObject->SetStringField(TEXT("label"), Label);
 		ButtonObject->SetStringField(TEXT("kind"), Kind);
 		return ButtonObject;
+	}
+
+	TSharedRef<FJsonObject> MakeOptionObject(const FString& Value, const FString& Label)
+	{
+		TSharedRef<FJsonObject> OptionObject = MakeShared<FJsonObject>();
+		OptionObject->SetStringField(TEXT("value"), Value);
+		OptionObject->SetStringField(TEXT("label"), Label);
+		return OptionObject;
 	}
 
 	bool IsWebUIButtonFunction(const UFunction* Function)
@@ -650,6 +763,154 @@ load();
 		return false;
 	}
 
+	bool InvokeWebUIActionFunction(UObject* Owner, const FName ActionId, FString& OutError)
+	{
+		if (!IsValid(Owner) || ActionId.IsNone())
+		{
+			OutError = TEXT("Action not found");
+			return false;
+		}
+
+		UFunction* Function = Owner->FindFunction(ActionId);
+		if (!Function || Function->NumParms != 0)
+		{
+			OutError = TEXT("Action not found");
+			return false;
+		}
+
+		Owner->ProcessEvent(Function, nullptr);
+		return true;
+	}
+
+	bool InvokeWebUIStringFunction(UObject* Owner, const FName FunctionName, const FString& Value, FString& OutError)
+	{
+		if (!IsValid(Owner) || FunctionName.IsNone())
+		{
+			OutError = TEXT("Callback not found");
+			return false;
+		}
+
+		UFunction* Function = Owner->FindFunction(FunctionName);
+		if (!Function || Function->NumParms != 1)
+		{
+			OutError = TEXT("Callback not found");
+			return false;
+		}
+
+		FProperty* ParamProperty = Function->PropertyLink;
+		while (ParamProperty && !ParamProperty->HasAnyPropertyFlags(CPF_Parm))
+		{
+			ParamProperty = ParamProperty->PropertyLinkNext;
+		}
+
+		FStrProperty* StringProperty = CastField<FStrProperty>(ParamProperty);
+		if (!StringProperty)
+		{
+			OutError = TEXT("Callback must take a string parameter");
+			return false;
+		}
+
+		TArray<uint8> Params;
+		Params.SetNumZeroed(Function->ParmsSize);
+		StringProperty->SetPropertyValue(StringProperty->ContainerPtrToValuePtr<void>(Params.GetData()), Value);
+		Owner->ProcessEvent(Function, Params.GetData());
+		return true;
+	}
+
+	void AddStringOptionFields(UObject* Owner, const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
+	{
+		if (!IsValid(Owner) || !Property || !Property->HasMetaData(TEXT("WebUIOptions")))
+		{
+			return;
+		}
+
+		const FString OptionsFunctionName = Property->GetMetaData(TEXT("WebUIOptions"));
+		if (OptionsFunctionName.IsEmpty())
+		{
+			return;
+		}
+
+		UFunction* Function = Owner->FindFunction(FName(*OptionsFunctionName));
+		if (!Function)
+		{
+			return;
+		}
+
+		FArrayProperty* ArrayProperty = nullptr;
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			FProperty* ParameterProperty = *It;
+			if (ParameterProperty->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				continue;
+			}
+			ArrayProperty = CastField<FArrayProperty>(ParameterProperty);
+			break;
+		}
+
+		FStrProperty* InnerStringProperty = ArrayProperty ? CastField<FStrProperty>(ArrayProperty->Inner) : nullptr;
+		if (!ArrayProperty || !InnerStringProperty)
+		{
+			return;
+		}
+
+		TArray<uint8> Params;
+		Params.SetNumZeroed(Function->ParmsSize);
+		Owner->ProcessEvent(Function, Params.GetData());
+
+		void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Params.GetData());
+		FScriptArrayHelper ArrayHelper(ArrayProperty, ArrayPtr);
+		if (ArrayHelper.Num() <= 0)
+		{
+			return;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Options;
+		Options.Reserve(ArrayHelper.Num());
+		for (int32 Index = 0; Index < ArrayHelper.Num(); ++Index)
+		{
+			const FString OptionValue = InnerStringProperty->GetPropertyValue(ArrayHelper.GetRawPtr(Index));
+			Options.Add(MakeShared<FJsonValueObject>(MakeOptionObject(OptionValue, OptionValue)));
+		}
+
+		if (!Options.IsEmpty())
+		{
+			PropertyObject->SetArrayField(TEXT("options"), Options);
+		}
+	}
+
+	void AddStringActionFields(UObject* Owner, const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
+	{
+		if (!IsValid(Owner) || !Property || !Property->HasMetaData(TEXT("WebUIActions")))
+		{
+			return;
+		}
+
+		const FString ActionsMeta = Property->GetMetaData(TEXT("WebUIActions"));
+		TArray<FString> ActionNames;
+		ActionsMeta.ParseIntoArray(ActionNames, TEXT(","), true);
+
+		TArray<TSharedPtr<FJsonValue>> Actions;
+		for (FString ActionName : ActionNames)
+		{
+			ActionName.TrimStartAndEndInline();
+			if (ActionName.IsEmpty())
+			{
+				continue;
+			}
+
+			const FName ActionId(*ActionName);
+			UFunction* ActionFunction = Owner->FindFunction(ActionId);
+			const FString Label = ActionFunction ? ActionFunction->GetDisplayNameText().ToString() : ActionName;
+			Actions.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ActionName, Label.IsEmpty() ? ActionName : Label, TEXT("action"))));
+		}
+
+		if (!Actions.IsEmpty())
+		{
+			PropertyObject->SetArrayField(TEXT("actions"), Actions);
+		}
+	}
+
 	void AddEnumSchemaFields(const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
 	{
 		const UEnum* Enum = nullptr;
@@ -736,6 +997,7 @@ bool UWebUIRuntimeSubsystem::StartServer(int32 Port)
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/webui")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleWebUI)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/schema")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleSchema)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/property")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleProperty)));
+	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/action")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleAction)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/button")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleButton)));
 
 	HttpServerModule.StartAllListeners();
@@ -849,6 +1111,40 @@ bool UWebUIRuntimeSubsystem::HandleProperty(const FHttpServerRequest& Request, c
 	if (!Owner || !Value.IsValid() || !SetPropertyFromJson(Owner, Host, PropertyName, Value, Error))
 	{
 		OnComplete(MakeJsonResponse(MakeErrorObject(Error.IsEmpty() ? TEXT("Failed to set property") : Error)));
+		return true;
+	}
+
+	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+	Response->SetBoolField(TEXT("ok"), true);
+	OnComplete(MakeJsonResponse(Response));
+	return true;
+}
+
+bool UWebUIRuntimeSubsystem::HandleAction(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
+{
+	FString Error;
+	TSharedPtr<FJsonObject> Body = ParseRequestJson(Request, Error);
+	if (!Body.IsValid())
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(Error)));
+		return true;
+	}
+
+	const FString WebUIId = Body->GetStringField(TEXT("webUIId"));
+	const FString OwnerType = Body->HasField(TEXT("ownerType")) ? Body->GetStringField(TEXT("ownerType")) : TEXT("component");
+	const FString ComponentId = Body->HasField(TEXT("componentId")) ? Body->GetStringField(TEXT("componentId")) : FString();
+	const FName ActionId(*Body->GetStringField(TEXT("actionId")));
+	UWebUIHostComponent* Host = nullptr;
+	UObject* Owner = FindPropertyOwner(WebUIId, OwnerType, ComponentId, Host);
+	if (!Owner || ActionId.IsNone())
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Action not found"))));
+		return true;
+	}
+
+	if (!InvokeWebUIActionFunction(Owner, ActionId, Error))
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(Error.IsEmpty() ? TEXT("Action not found") : Error)));
 		return true;
 	}
 
@@ -1020,6 +1316,11 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 		{
 			AddEnumSchemaFields(Property, PropertyObject);
 		}
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("string"))
+		{
+			AddStringOptionFields(Actor, Property, PropertyObject);
+			AddStringActionFields(Actor, Property, PropertyObject);
+		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 
@@ -1059,6 +1360,11 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("enum"))
 		{
 			AddEnumSchemaFields(Property, PropertyObject);
+		}
+		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("string"))
+		{
+			AddStringOptionFields(Component, Property, PropertyObject);
+			AddStringActionFields(Component, Property, PropertyObject);
 		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
@@ -1257,18 +1563,48 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 		const FString StringValue = Value->AsString();
 		StringProperty->SetPropertyValue(PropertyPtr, StringValue);
 		NotifyStringChanged(*PropertyName, StringValue);
+		const FString OnChangedFunctionName = Property->GetMetaData(TEXT("WebUIOnChanged"));
+		if (!OnChangedFunctionName.IsEmpty())
+		{
+			FString CallbackError;
+			if (!InvokeWebUIStringFunction(Owner, FName(*OnChangedFunctionName), StringValue, CallbackError))
+			{
+				OutError = CallbackError;
+				return false;
+			}
+		}
 	}
 	else if (FNameProperty* NameProperty = CastField<FNameProperty>(Property))
 	{
 		const FString StringValue = Value->AsString();
 		NameProperty->SetPropertyValue(PropertyPtr, FName(*StringValue));
 		NotifyStringChanged(*PropertyName, StringValue);
+		const FString OnChangedFunctionName = Property->GetMetaData(TEXT("WebUIOnChanged"));
+		if (!OnChangedFunctionName.IsEmpty())
+		{
+			FString CallbackError;
+			if (!InvokeWebUIStringFunction(Owner, FName(*OnChangedFunctionName), StringValue, CallbackError))
+			{
+				OutError = CallbackError;
+				return false;
+			}
+		}
 	}
 	else if (FTextProperty* TextProperty = CastField<FTextProperty>(Property))
 	{
 		const FString StringValue = Value->AsString();
 		TextProperty->SetPropertyValue(PropertyPtr, FText::FromString(StringValue));
 		NotifyStringChanged(*PropertyName, StringValue);
+		const FString OnChangedFunctionName = Property->GetMetaData(TEXT("WebUIOnChanged"));
+		if (!OnChangedFunctionName.IsEmpty())
+		{
+			FString CallbackError;
+			if (!InvokeWebUIStringFunction(Owner, FName(*OnChangedFunctionName), StringValue, CallbackError))
+			{
+				OutError = CallbackError;
+				return false;
+			}
+		}
 	}
 	else if (FEnumProperty* EnumProperty = CastField<FEnumProperty>(Property))
 	{

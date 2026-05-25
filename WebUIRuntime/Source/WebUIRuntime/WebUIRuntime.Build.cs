@@ -14,7 +14,9 @@ public class WebUIRuntime : ModuleRules
 				"Engine",
 				"EngineSettings",
 				"Json",
-				"DeveloperSettings"
+				"DeveloperSettings",
+				"UMG",
+				"WebBrowserWidget"
 			}
 		);
 
@@ -22,7 +24,9 @@ public class WebUIRuntime : ModuleRules
 			new string[]
 			{
 				"HTTPServer",
-				"JsonUtilities"
+				"JsonUtilities",
+				"Slate",
+				"SlateCore"
 			}
 		);
 
