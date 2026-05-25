@@ -32,7 +32,11 @@ namespace
 	const FString JsonContentType = TEXT("application/json; charset=utf-8");
 	const FString HtmlContentType = TEXT("text/html; charset=utf-8");
 
-	const TCHAR* WebUIHtml = TEXT(R"HTML(
+	FString BuildWebUIHtml()
+	{
+		FString Html;
+		Html.Reserve(65536);
+		Html += TEXT(R"HTML(
 <!doctype html>
 <html>
 <head>
@@ -78,7 +82,7 @@ body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%
 .panel.active{display:block}
 .host-meta{opacity:.78;margin-top:4px;white-space:pre-wrap}
 .component{border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
-label.property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
+.property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
 .property-name{padding-top:2px;min-width:0}
 .property-control{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-start;min-width:0;width:100%}
 input,button,select{font:inherit;padding:8px;border-radius:6px;border:1px solid var(--border);background:#0d1015;color:var(--text);box-sizing:border-box}
@@ -86,6 +90,14 @@ body.theme-light input,body.theme-light button,body.theme-light select{backgroun
 input[type="text"],input[type="number"],select{width:100%;min-width:0}
 input[type="range"]{flex:1 1 240px;min-width:180px;padding:8px 0}
 .numeric-field{width:120px}
+.option-picker{position:relative;flex:1 1 260px;min-width:180px;max-width:100%}
+.option-picker-button{width:100%;display:flex;justify-content:space-between;gap:8px;text-align:left}
+.option-picker-button::after{content:'v';opacity:.65}
+.option-picker-menu{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);max-height:240px;overflow:auto;border:1px solid var(--border-strong);border-radius:6px;background:#0d1015;box-shadow:0 12px 28px rgba(0,0,0,.35)}
+.option-picker-menu[hidden]{display:none}
+.option-picker-option{display:block;width:100%;border:0;border-radius:0;background:transparent;text-align:left}
+.option-picker-option:hover,.option-picker-option.selected{background:var(--button-bg-pressed)}
+body.theme-light .option-picker-menu{background:#ffffff}
 .vector-group,.rotator-group,.color-group,.linear-color-group{display:grid;width:100%;align-items:center}
 .vector-group,.rotator-group{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .vector-group input,.rotator-group input{width:100%;min-width:0}
@@ -93,6 +105,7 @@ input[type="range"]{flex:1 1 240px;min-width:180px;padding:8px 0}
 .linear-color-group{grid-template-columns:140px minmax(0,1fr)}
 .color-swatch,.linear-color-swatch{padding:8px;border-radius:6px;background:#0d1015}
 body.theme-light .color-swatch,body.theme-light .linear-color-swatch{background:#ffffff}
+.hex-field{font-family:ui-monospace,Consolas,monospace}
 .alpha-field{width:90px}
 .checkbox-field{margin-left:0}
 .range-field{flex:1 1 240px}
@@ -105,8 +118,18 @@ button.webui-button:disabled{opacity:.72;cursor:default}
 .empty{opacity:.75;padding:16px 0}
 body.compact .tabs{margin-top:0}
 body.compact .panel{padding:12px}
-body.compact label.property-row{margin:8px 0;grid-template-columns:150px minmax(0,1fr)}
+body.compact .property-row{margin:8px 0;grid-template-columns:150px minmax(0,1fr)}
+.linear-color-group{grid-template-columns:minmax(0,180px) minmax(0,1fr)}
+.linear-color-group>input[type="color"]{width:44px;min-width:44px;height:39px;padding:4px}
+body:not(.embed) .linear-color-group{grid-template-columns:44px minmax(0,180px) minmax(0,1fr)}
+body.embed .linear-color-group{grid-template-columns:minmax(0,180px) minmax(0,1fr)}
+.color-picker-group{display:grid;grid-template-columns:44px minmax(0,1fr);gap:8px;align-items:center;min-width:0}
+.color-picker-group input[type="color"]{width:44px;min-width:44px;height:39px;padding:4px}
+.color-picker-group .hex-field{width:100%;min-width:0}
+body.embed .color-picker-group{grid-template-columns:minmax(0,1fr)}
 </style>
+)HTML");
+		Html += TEXT(R"HTML(
 </head>
 <body class="theme-dark">
 <div class="page-shell">
@@ -155,16 +178,75 @@ function resolveNumericStep(p){
  return step!==null?step:(p.type==='int32'?1:0.01);
 }
 function createRow(p){
- const label=document.createElement('label');
- label.className='property-row';
+ const row=document.createElement('div');
+ row.className='property-row';
  const name=document.createElement('div');
  name.className='property-name';
  name.textContent=p.name;
  const control=document.createElement('div');
  control.className='property-control';
- label.append(name,control);
- return {label,control};
+ row.append(name,control);
+ return {label:row,control};
 }
+function renderOptionPicker(currentValue,options,onCommit){
+ const picker=document.createElement('div');
+ picker.className='option-picker';
+ const button=document.createElement('button');
+ button.type='button';
+ button.className='option-picker-button';
+ const menu=document.createElement('div');
+ menu.className='option-picker-menu';
+ menu.hidden=true;
+ const normalizedOptions=options||[];
+ let selectedValue=String(currentValue ?? '');
+ let isChoosing=false;
+ const labelFor=(value)=>{
+  const match=normalizedOptions.find(option=>String(option.value ?? '')===String(value ?? ''));
+  if(match){return match.label||match.value||'Select...';}
+  return selectedValue || 'Select...';
+ };
+ const updateButton=()=>{button.textContent=labelFor(selectedValue);};
+ const chooseOption=async(optionValue,optionButton)=>{
+  if(isChoosing){return;}
+  isChoosing=true;
+  selectedValue=optionValue;
+  for(const child of menu.children){child.classList.toggle('selected',child===optionButton);}
+  updateButton();
+  menu.hidden=true;
+  try{
+   await onCommit(selectedValue);
+  }finally{
+   setTimeout(()=>{isChoosing=false;},0);
+  }
+ };
+ for(const option of normalizedOptions){
+  const optionValue=String(option.value ?? '');
+  const optionButton=document.createElement('button');
+  optionButton.type='button';
+  optionButton.className='option-picker-option';
+  optionButton.textContent=option.label||option.value||'Select...';
+  optionButton.onpointerdown=(event)=>{
+   event.preventDefault();
+   chooseOption(optionValue,optionButton);
+  };
+  optionButton.onmousedown=(event)=>{
+   event.preventDefault();
+   chooseOption(optionValue,optionButton);
+  };
+  optionButton.onclick=(event)=>{
+   event.preventDefault();
+  };
+  optionButton.classList.toggle('selected',optionValue===selectedValue);
+  menu.append(optionButton);
+ }
+ button.onclick=(event)=>{event.preventDefault(); menu.hidden=!menu.hidden;};
+ button.onblur=()=>setTimeout(()=>{if(!isChoosing){menu.hidden=true;}},160);
+	updateButton();
+	picker.append(button,menu);
+	return picker;
+}
+)HTML");
+		Html += TEXT(R"HTML(
 function commitProperty(host,ownerType,componentId,p,value){
  return api('/api/webui/property',{webUIId:host.webUIId,ownerType,componentId,propertyName:p.name,value});
 }
@@ -180,65 +262,42 @@ function renderBoolProperty(host,ownerType,componentId,p){
 }
 function renderStringProperty(host,ownerType,componentId,p){
  const {label,control}=createRow(p);
+ const actions=p.actions||[];
  if((p.options||[]).length){
-  const select=document.createElement('select');
-  select.style.flex='1 1 260px';
-  select.style.minWidth='180px';
-  select.style.width='auto';
-  const currentValue=String(p.value ?? '');
-  let hasSelection=false;
-  for(const option of p.options||[]){
-   const opt=document.createElement('option');
-   opt.value=option.value;
-   opt.textContent=option.label||option.value;
-   if(option.value===currentValue){
-    opt.selected=true;
-    hasSelection=true;
-   }
-   select.append(opt);
-  }
-  if(!hasSelection){
-   const opt=document.createElement('option');
-   opt.value='';
-   opt.textContent='Select...';
-   opt.selected=true;
-   select.prepend(opt);
-  }
-  select.onchange=()=>commitProperty(host,ownerType,componentId,p,select.value);
-  control.append(select);
-  if((p.actions||[]).length){
-   const actions=document.createElement('div');
-   actions.style.display='flex';
-   actions.style.flexWrap='wrap';
-   actions.style.gap='8px';
-   for(const action of p.actions||[]){
-    const btn=document.createElement('button');
-    btn.type='button';
-    btn.textContent=action.label || action.id;
-    btn.onclick=async()=>{
-     btn.disabled=true;
-     try{
-      await api('/api/webui/action',{webUIId:host.webUIId,ownerType,componentId,actionId:action.id});
-      await load();
-     }finally{
-      btn.disabled=false;
-     }
-    };
-    actions.append(btn);
-   }
-   control.append(actions);
-  }
-  return label;
+  control.append(renderOptionPicker(p.value,p.options,value=>commitProperty(host,ownerType,componentId,p,value).then(load)));
+ } else {
+  const input=document.createElement('input');
+  input.type='text';
+  input.value=p.value ?? '';
+  input.onchange=()=>commitProperty(host,ownerType,componentId,p,input.value);
+  control.append(input);
  }
- const input=document.createElement('input');
- input.type='text';
- input.value=p.value ?? '';
- input.onchange=()=>commitProperty(host,ownerType,componentId,p,input.value);
- control.append(input);
+ if(actions.length){
+  const actionsRow=document.createElement('div');
+  actionsRow.style.display='flex';
+  actionsRow.style.flexWrap='wrap';
+  actionsRow.style.gap='8px';
+  for(const action of actions){
+   const btn=document.createElement('button');
+   btn.type='button';
+   btn.textContent=action.label || action.id;
+   btn.onclick=async()=>{
+    btn.disabled=true;
+    try{
+     await api('/api/webui/action',{webUIId:host.webUIId,ownerType,componentId,actionId:action.id});
+     await load();
+    }finally{
+     btn.disabled=false;
+    }
+   };
+   actionsRow.append(btn);
+  }
+  control.append(actionsRow);
+ }
  return label;
-}
-)HTML")
-TEXT(R"HTML(
+	}
+		)HTML");
+		Html += TEXT(R"HTML(
 function renderNumericProperty(host,ownerType,componentId,p){
  const {label,control}=createRow(p);
  const current=numberOrNull(p.value) ?? 0;
@@ -279,23 +338,14 @@ function renderNumericProperty(host,ownerType,componentId,p){
  input.value=String(current);
  input.className='numeric-field';
  input.onchange=()=>commitProperty(host,ownerType,componentId,p,p.type==='int32'?parseInt(input.value,10):parseFloat(input.value));
- control.append(input);
- return label;
+	control.append(input);
+	return label;
 }
-)HTML")
-TEXT(R"HTML(
+	)HTML");
+		Html += TEXT(R"HTML(
 function renderEnumProperty(host,ownerType,componentId,p){
  const {label,control}=createRow(p);
- const select=document.createElement('select');
- for(const option of p.options||[]){
-  const opt=document.createElement('option');
-  opt.value=option.value;
-  opt.textContent=option.label||option.value;
-  if(option.value===p.value){opt.selected=true;}
-  select.append(opt);
- }
- select.onchange=()=>commitProperty(host,ownerType,componentId,p,select.value);
- control.append(select);
+ control.append(renderOptionPicker(p.value,p.options,value=>commitProperty(host,ownerType,componentId,p,value).then(load)));
  return label;
 }
 function makeNumberInput(value,placeholder){
@@ -340,6 +390,8 @@ function renderRotatorProperty(host,ownerType,componentId,p){
  control.append(group);
  return label;
 }
+		)HTML");
+		Html += TEXT(R"HTML(
 function colorToHexComponent(v){
  return Math.max(0,Math.min(255,Math.round((numberOrNull(v) ?? 0)*255))).toString(16).padStart(2,'0');
 }
@@ -364,6 +416,16 @@ function hexToColor(hex,alpha){
  const b=parseInt(clean.slice(4,6)||'00',16)/255;
  return {r,g,b,a:alpha};
 }
+function normalizeHexInput(value){
+ const clean=String(value||'').trim().replace('#','');
+ if(/^[0-9a-fA-F]{3}$/.test(clean)){
+  return `#${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`;
+ }
+ if(/^[0-9a-fA-F]{6}$/.test(clean)){
+  return `#${clean}`;
+ }
+ return null;
+}
 function colorToCssRgba(value,linearSpace=false){
  const r=Math.max(0,Math.min(255,Math.round((linearSpace ? (numberOrNull(value.r) ?? 0) <= 0.0031308 ? (numberOrNull(value.r) ?? 0) * 12.92 : 1.055 * Math.pow(numberOrNull(value.r) ?? 0, 1 / 2.4) - 0.055 : (numberOrNull(value.r) ?? 0))*255)));
  const g=Math.max(0,Math.min(255,Math.round((linearSpace ? (numberOrNull(value.g) ?? 0) <= 0.0031308 ? (numberOrNull(value.g) ?? 0) * 12.92 : 1.055 * Math.pow(numberOrNull(value.g) ?? 0, 1 / 2.4) - 0.055 : (numberOrNull(value.g) ?? 0))*255)));
@@ -378,6 +440,8 @@ function getContrastColor(value){
  const luminance=(0.2126*r)+(0.7152*g)+(0.0722*b);
  return luminance > 0.55 ? '#101216' : '#ffffff';
 }
+		)HTML");
+		Html += TEXT(R"HTML(
 function renderColorLikeProperty(host,ownerType,componentId,p,clamp01,displayLinearSpace,pickerLinearSpace){
  const {label,control}=createRow(p);
  const value=p.value||{};
@@ -386,9 +450,15 @@ function renderColorLikeProperty(host,ownerType,componentId,p,clamp01,displayLin
  control.style.color=getContrastColor(value);
  const group=document.createElement('div');
  group.className='linear-color-group';
- const picker=document.createElement('input');
- picker.type='color';
- picker.value=colorToHex(value,pickerLinearSpace);
+ const browserColorInput=document.createElement('input');
+ browserColorInput.type='color';
+ browserColorInput.value=colorToHex(value,pickerLinearSpace);
+ const hexInput=document.createElement('input');
+ hexInput.type='text';
+ hexInput.className='hex-field';
+ hexInput.value=colorToHex(value,pickerLinearSpace);
+ hexInput.placeholder='#RRGGBB';
+ hexInput.maxLength=7;
  const fields=[['r','R'],['g','G'],['b','B'],['a','A']];
  const inputs={};
  const numericGroup=document.createElement('div');
@@ -418,7 +488,8 @@ function renderColorLikeProperty(host,ownerType,componentId,p,clamp01,displayLin
   };
   control.style.backgroundColor=colorToCssRgba(next,displayLinearSpace);
   control.style.color=getContrastColor(next);
-  picker.value=colorToHex(next,pickerLinearSpace);
+  hexInput.value=colorToHex(next,pickerLinearSpace);
+  if(!isEmbed){browserColorInput.value=hexInput.value;}
  };
  const commit=()=>{
   const next={
@@ -429,18 +500,31 @@ function renderColorLikeProperty(host,ownerType,componentId,p,clamp01,displayLin
   };
   commitProperty(host,ownerType,componentId,p,next);
  };
- picker.oninput=()=>{
-  const next=hexToColor(picker.value,parseFloat(inputs.a.value));
+ hexInput.oninput=()=>{
+  const normalizedHex=normalizeHexInput(hexInput.value);
+  if(!normalizedHex){return;}
+  const next=hexToColor(normalizedHex,parseFloat(inputs.a.value));
   inputs.r.value=String(pickerLinearSpace ? srgbToLinearComponent(next.r) : next.r);
   inputs.g.value=String(pickerLinearSpace ? srgbToLinearComponent(next.g) : next.g);
   inputs.b.value=String(pickerLinearSpace ? srgbToLinearComponent(next.b) : next.b);
   refreshSwatch();
   commit();
  };
+ if(!isEmbed){
+  browserColorInput.oninput=()=>{
+   const next=hexToColor(browserColorInput.value,parseFloat(inputs.a.value));
+   inputs.r.value=String(pickerLinearSpace ? srgbToLinearComponent(next.r) : next.r);
+   inputs.g.value=String(pickerLinearSpace ? srgbToLinearComponent(next.g) : next.g);
+   inputs.b.value=String(pickerLinearSpace ? srgbToLinearComponent(next.b) : next.b);
+   refreshSwatch();
+   commit();
+  };
+ }
  for(const input of Object.values(inputs)){
   input.onchange=()=>{refreshSwatch(); commit();};
  }
- group.append(picker,numericGroup);
+ if(!isEmbed){group.append(browserColorInput);}
+ group.append(hexInput,numericGroup);
  control.append(group);
  return label;
 }
@@ -458,11 +542,11 @@ function renderProperties(host,ownerType,componentId,properties){
  const section=document.createElement('section');
  for(const p of properties||[]){
   section.append(renderProperty(host,ownerType,componentId,p));
- }
- return section;
+	}
+	return section;
 }
-)HTML")
-TEXT(R"HTML(
+	)HTML");
+		Html += TEXT(R"HTML(
 function renderButtonRow(host,ownerType,componentId,buttons){
  const buttonRow=document.createElement('div');
  buttonRow.className='button-list';
@@ -561,7 +645,9 @@ load();
 </script>
 </body>
 </html>
-)HTML");
+		)HTML");
+		return Html;
+	}
 
 	TSharedRef<FJsonObject> MakeErrorObject(const FString& Error)
 	{
@@ -812,8 +898,10 @@ load();
 
 		TArray<uint8> Params;
 		Params.SetNumZeroed(Function->ParmsSize);
+		Function->InitializeStruct(Params.GetData());
 		StringProperty->SetPropertyValue(StringProperty->ContainerPtrToValuePtr<void>(Params.GetData()), Value);
 		Owner->ProcessEvent(Function, Params.GetData());
+		Function->DestroyStruct(Params.GetData());
 		return true;
 	}
 
@@ -856,12 +944,14 @@ load();
 
 		TArray<uint8> Params;
 		Params.SetNumZeroed(Function->ParmsSize);
+		Function->InitializeStruct(Params.GetData());
 		Owner->ProcessEvent(Function, Params.GetData());
 
 		void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Params.GetData());
 		FScriptArrayHelper ArrayHelper(ArrayProperty, ArrayPtr);
 		if (ArrayHelper.Num() <= 0)
 		{
+			Function->DestroyStruct(Params.GetData());
 			return;
 		}
 
@@ -877,6 +967,8 @@ load();
 		{
 			PropertyObject->SetArrayField(TEXT("options"), Options);
 		}
+
+		Function->DestroyStruct(Params.GetData());
 	}
 
 	void AddStringActionFields(UObject* Owner, const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
@@ -1078,7 +1170,7 @@ FString UWebUIRuntimeSubsystem::GetWebUITitle() const
 
 bool UWebUIRuntimeSubsystem::HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
 {
-	FString Html(WebUIHtml);
+	FString Html = BuildWebUIHtml();
 	Html.ReplaceInline(TEXT("__WEBUI_TITLE__"), *GetWebUITitle(), ESearchCase::CaseSensitive);
 	OnComplete(FHttpServerResponse::Create(MoveTemp(Html), HtmlContentType));
 	return true;
