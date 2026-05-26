@@ -73,7 +73,7 @@ namespace
  .external-link:hover{color:var(--text);border-color:var(--border-strong)}
  body.embed .page-header{display:none}
  .app-shell{display:flex;flex-direction:column;flex:1;min-height:0}
- .tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid var(--border);flex:0 0 auto}
+ .tabs{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid var(--border);flex:0 0 auto;align-self:flex-start;max-width:100%}
  .tab{border:1px solid var(--border);border-bottom:none;background:var(--button-bg);color:var(--muted);padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
  .tab.active{background:var(--panel-bg);color:var(--text);border-color:var(--border-strong);border-bottom:1px solid var(--panel-bg);z-index:1}
  body.embed .tab.active{border-bottom-color:transparent}
