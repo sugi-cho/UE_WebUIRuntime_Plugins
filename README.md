@@ -33,6 +33,124 @@
 - ポートは個別設定ではなく、Project Settings の 1 設定を使います。
 - `Allow Remote Access` を有効にすると、HTTPServer の bind を `any` にして LAN 内から見えるようにします。
 
+## `WebUIHostActor` について
+
+- `WebUIHostComponent` を内包した Actor です。
+- まずは `WebUIHostActor` を置く運用を推奨します。
+- Actor 側の `WebUIId` / `Description` / `bAutoStartServer` を使い、内部で `WebUIHostComponent` を同期します。
+- 既存 Actor に後付けしたい場合は、従来どおり `WebUIHostComponent` 単体でも使えます。
+- ボタンは `WebUIHostComponent` 側を上段コントロールとして使います。
+
+## `WebUIComponent` について
+
+- 実際の UI 要素は `WebUIComponentBase` か、その派生クラスに置きます。
+- `WebUIComponentBase` はそのまま使ってもよいですし、独自の Component を作って継承しても使えます。
+- たとえば NDI 用の `WebUINDIComponent` のように、用途ごとに派生 Component を追加できます。
+- `WebUIHostComponent` を持つ Actor には、Actor 自身の `WebUI` 変数も上段に表示され、その下に Component ごとのセクションが並びます。
+- `WebUIHostComponent` のボタンは、Actor セクション内の共通コントロールとして表示されます。
+
+## 画像表示
+
+`WebUIImageComponent` を追加すると、Web UI で画像を表示できます。
+
+### 設定方法
+
+1. Actor に `WebUIImageComponent` を追加します。
+2. `SourceTexture` に表示したい `Texture2D` か `RenderTarget` を設定します。
+3. `WebUIImageSlot` で表示先を選びます。
+4. `bForceOpaqueRenderTargetImage` は、RenderTarget の alpha を不透明にしたいときだけ使います。
+
+### `WebUIImageSlot`
+
+- `Preview`
+  - タブ上段のプレビュー領域に表示します。
+- `Icon`
+  - タブ見出しのアイコンとして表示します。
+- `Inline`
+  - コンポーネントのプロパティ欄の直後に表示します。
+
+### 配信方式
+
+- `Texture2D`
+  - HTTP 経由で静的画像として配信します。
+- `RenderTarget`
+  - WebSocket 経由でフレーム配信します。
+- `NDI`
+  - `WebUI_NDI` を有効にすると、`NDIMediaTexture2D` も `WebUIImageComponent` の `SourceTexture` として扱えます。
+  - NDI テクスチャは内部的にフレーム読み出しして表示します。
+
+### 補足
+
+- `RenderTarget` は WebSocket 配信を使うため、`WebUIRuntime` の `WebSocketPort` が有効である必要があります。
+- NDI 画像を使う場合は、`WebUI_NDI` と `NDIIOPlugin` の両方を有効化してください。
+- NDI 側の受信先は `WebUINDIComponent` の `TargetNDIReceiverComponent` で指定します。
+- 画像が表示されない場合は、`SourceTexture` が正しく設定されているか、`WebUIId` が一致しているかを確認してください。
+
+## Property を WebUI に出す方法
+
+1. 対象の `UPROPERTY` を `Category="WebUI"` にします。
+2. もしくは `meta=(WebUI)` を付けます。
+3. UE の Details 上で `Web UI` に見えるカテゴリも同義として扱います。
+4. 対応型の値だけが WebUI に出ます。
+5. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
+6. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
+7. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
+
+### 対応型
+
+`WebUIRuntime` が現在対応している `UPROPERTY` の型は次のとおりです。
+
+- `bool`
+- `int32`
+- `float` / `double`
+- `FString` / `FName` / `FText`
+- `enum`
+- `FVector`
+- `FRotator`
+- `FColor`
+- `FLinearColor`
+
+JSON での入力例:
+
+```json
+{
+  "bool": true,
+  "int32": 42,
+  "float": 1.5,
+  "string": "hello",
+  "enum": "ValueName",
+  "vector": { "x": 1, "y": 2, "z": 3 },
+  "rotator": { "pitch": 10, "yaw": 20, "roll": 30 },
+  "color": { "r": 1, "g": 0.5, "b": 0, "a": 1 },
+  "linearColor": { "r": 0.2, "g": 0.4, "b": 0.6, "a": 1 }
+}
+```
+
+`TArray` / `TMap` / `TSet` / 任意の `UStruct` / オブジェクト参照は、この実装では対象外です。
+
+```cpp
+UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
+float Brightness;
+
+UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(WebUI))
+FLinearColor Tint;
+```
+
+WebUI 上で値を変更すると、UE 側の変数が更新され、その後 `OnWebUI...Changed` 系イベントが呼ばれます。
+
+## Button の作り方
+
+1. `WebUIComponentBase` か派生 Component で `RegisterWebUIButton("ButtonName")` を呼びます。
+2. `WebUIHostActor` から呼んだ場合も、内部の `WebUIHostComponent` のボタンとして扱われます。
+3. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
+
+```cpp
+RegisterWebUIButton(TEXT("Apply"));
+RegisterWebUIButton(TEXT("Reset"));
+```
+
+Button は Property と同じく WebUI に表示され、クリックで UE 側のイベントに戻ります。
+
 ## UE 内 Widget 表示
 
 `UWebUIRuntimeBrowserWidget` を使うと、既存の WebUI を `WebBrowserWidget` 経由で UE 内の UMG として表示できます。
@@ -102,87 +220,6 @@ URL 例:
 - `embed=1` は UMG 内表示専用の追加モードです。
 - `webuiId` クエリを付けると、初期表示タブを指定できます。
 
-## `WebUIHostActor` について
-
-- `WebUIHostComponent` を内包した Actor です。
-- まずは `WebUIHostActor` を置く運用を推奨します。
-- Actor 側の `WebUIId` / `Description` / `bAutoStartServer` を使い、内部で `WebUIHostComponent` を同期します。
-- 既存 Actor に後付けしたい場合は、従来どおり `WebUIHostComponent` 単体でも使えます。
-- ボタンは `WebUIHostComponent` 側を上段コントロールとして使います。
-
-## `WebUIComponent` について
-
-- 実際の UI 要素は `WebUIComponentBase` か、その派生クラスに置きます。
-- `WebUIComponentBase` はそのまま使ってもよいですし、独自の Component を作って継承しても使えます。
-- たとえば NDI 用の `WebUINDIComponent` のように、用途ごとに派生 Component を追加できます。
-- `WebUIHostComponent` を持つ Actor には、Actor 自身の `WebUI` 変数も上段に表示され、その下に Component ごとのセクションが並びます。
-- `WebUIHostComponent` のボタンは、Actor セクション内の共通コントロールとして表示されます。
-
-## Property を WebUI に出す方法
-
-1. 対象の `UPROPERTY` を `Category="WebUI"` にします。
-2. もしくは `meta=(WebUI)` を付けます。
-3. UE の Details 上で `Web UI` に見えるカテゴリも同義として扱います。
-4. 対応型の値だけが WebUI に出ます。
-5. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
-6. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
-7. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
-
-### 対応型
-
-`WebUIRuntime` が現在対応している `UPROPERTY` の型は次のとおりです。
-
-- `bool`
-- `int32`
-- `float` / `double`
-- `FString` / `FName` / `FText`
-- `enum`
-- `FVector`
-- `FRotator`
-- `FColor`
-- `FLinearColor`
-
-JSON での入力例:
-
-```json
-{
-  "bool": true,
-  "int32": 42,
-  "float": 1.5,
-  "string": "hello",
-  "enum": "ValueName",
-  "vector": { "x": 1, "y": 2, "z": 3 },
-  "rotator": { "pitch": 10, "yaw": 20, "roll": 30 },
-  "color": { "r": 1, "g": 0.5, "b": 0, "a": 1 },
-  "linearColor": { "r": 0.2, "g": 0.4, "b": 0.6, "a": 1 }
-}
-```
-
-`TArray` / `TMap` / `TSet` / 任意の `UStruct` / オブジェクト参照は、この実装では対象外です。
-
-```cpp
-UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
-float Brightness;
-
-UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(WebUI))
-FLinearColor Tint;
-```
-
-WebUI 上で値を変更すると、UE 側の変数が更新され、その後 `OnWebUI...Changed` 系イベントが呼ばれます。
-
-## Button の作り方
-
-1. `WebUIComponentBase` か派生 Component で `RegisterWebUIButton("ButtonName")` を呼びます。
-2. `WebUIHostActor` から呼んだ場合も、内部の `WebUIHostComponent` のボタンとして扱われます。
-3. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
-
-```cpp
-RegisterWebUIButton(TEXT("Apply"));
-RegisterWebUIButton(TEXT("Reset"));
-```
-
-Button は Property と同じく WebUI に表示され、クリックで UE 側のイベントに戻ります。
-
 ## `WebUI_NDI` について
 
 - `WebUI_NDI` は `NDIIOPlugin` を前提にします。
@@ -191,6 +228,7 @@ Button は Property と同じく WebUI に表示され、クリックで UE 側�
 - 公式 SDK は Project `Plugins/` と Engine `Plugins/` の両方に入れられますが、このリポジトリでは Project `Plugins/` 前提で扱います。
 - 公式 SDK はこちらです: [NDI Unreal Engine SDK](https://ndi.video/for-developers/ndi-unreal-engine-sdk/)
 - このリポジトリでは UE 5.7 向けの `NDIIOPlugin` を想定しています。
+- `WebUI_NDI` を有効にすると、`NDIMediaTexture2D` を `WebUIImageComponent` で表示できます。
 - 5.7 以外の Unreal Engine では、そのままでは動作しない可能性があります。
 
 ## 注意事項
