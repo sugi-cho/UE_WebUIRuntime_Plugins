@@ -78,17 +78,20 @@ namespace
  .tab.active{background:var(--panel-bg);color:var(--text);border-color:var(--border-strong);border-bottom:1px solid var(--panel-bg);z-index:1}
  body.embed .tab.active{border-bottom-color:transparent}
  .tab:not(.active){opacity:.9}
- .panel-scroll{flex:1;min-height:0;overflow:auto;padding:0 8px 0 0;scrollbar-width:thin;scrollbar-color:transparent transparent;overscroll-behavior:contain}
- body.scrolling .panel-scroll{scrollbar-color:rgba(255,255,255,.36) transparent}
- body.theme-light.scrolling .panel-scroll{scrollbar-color:rgba(16,18,22,.34) transparent}
- .panel-scroll::-webkit-scrollbar{width:10px;height:10px;background:transparent}
- .panel-scroll::-webkit-scrollbar-track{background:transparent}
- .panel-scroll::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;background-clip:padding-box;transition:background-color .15s ease}
- body.scrolling .panel-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.32)}
- body.theme-light.scrolling .panel-scroll::-webkit-scrollbar-thumb{background:rgba(16,18,22,.28)}
- .panel{display:none;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);padding:16px;margin:0 0 var(--content-gap);background:var(--panel-bg)}
+ .panel-scroll{flex:1;min-height:0;display:flex}
+ .panel-scroll > div{flex:1;min-height:0;display:flex}
+ .panel{display:none;flex:1;min-height:0;flex-direction:column;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);background:var(--panel-bg);overflow:hidden}
  body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%) blur(4px)}
- .panel.active{display:block}
+ .panel.active{display:flex}
+ .panel-header{flex:0 0 auto;padding:16px 16px 0}
+ .panel-body{flex:1;min-height:0;overflow:auto;padding:0 16px 16px;scrollbar-width:thin;scrollbar-color:transparent transparent;overscroll-behavior:contain}
+ body.scrolling .panel-body{scrollbar-color:rgba(255,255,255,.36) transparent}
+ body.theme-light.scrolling .panel-body{scrollbar-color:rgba(16,18,22,.34) transparent}
+ .panel-body::-webkit-scrollbar{width:10px;height:10px;background:transparent}
+ .panel-body::-webkit-scrollbar-track{background:transparent}
+ .panel-body::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;background-clip:padding-box;transition:background-color .15s ease}
+ body.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.32)}
+ body.theme-light.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(16,18,22,.28)}
 .host-meta{opacity:.78;margin-top:4px;white-space:pre-wrap}
 .component{border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
 .property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
@@ -126,7 +129,8 @@ button.webui-button:disabled{opacity:.72;cursor:default}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
  body.compact .tabs{margin-top:0}
- body.compact .panel{padding:12px}
+ body.compact .panel-header{padding:12px 12px 0}
+ body.compact .panel-body{padding:0 12px 12px}
 body.compact .property-row{margin:8px 0;grid-template-columns:150px minmax(0,1fr)}
 .linear-color-group{grid-template-columns:minmax(0,180px) minmax(0,1fr)}
 .linear-color-group>input[type="color"]{width:44px;min-width:44px;height:39px;padding:4px}
@@ -163,7 +167,7 @@ const initialWebUIId=params.get('webuiId') || '';
 const isEmbed=params.get('embed')==='1';
 const isCompact=params.get('compact')==='1';
 const theme=(params.get('theme')||'dark').toLowerCase();
-let scrollContainer=null;
+ let scrollContainer=null;
 let scrollStateTimer=null;
 document.body.classList.toggle('embed',isEmbed);
 document.body.classList.toggle('compact',isCompact);
@@ -620,11 +624,12 @@ async function load(){
   panelScrollHost.append(empty);
   return;
  }
-  const panelScroll=panelScrollHost;
-  panelScroll.onscroll=()=>setScrollingState(true);
-  scrollContainer=panelScroll;
  const panels=document.createElement('div');
+ panels.style.display='flex';
+ panels.style.flex='1';
+ panels.style.minHeight='0';
  const requestedWebUIId=currentWebUIId || restoreWebUIId || initialWebUIId;
+ const bodyByWebUIId=new Map();
   const setActive=(webUIId)=>{
    currentWebUIId=webUIId;
    for(const tab of tabsHost.querySelectorAll('[data-webui-id]')){
@@ -632,6 +637,14 @@ async function load(){
    }
    for(const panel of panels.querySelectorAll('[data-webui-panel]')){
     panel.classList.toggle('active',panel.dataset.webuiPanel===webUIId);
+   }
+   const activeBody=bodyByWebUIId.get(webUIId);
+   if(activeBody){
+    scrollContainer=activeBody;
+    activeBody.onscroll=()=>setScrollingState(true);
+    requestAnimationFrame(()=>{
+     activeBody.scrollTop=restoreScrollTop;
+    });
    }
   };
  for(const host of hosts){
@@ -643,35 +656,39 @@ async function load(){
   tab.onclick=()=>setActive(host.webUIId);
    tabsHost.append(tab);
 
-  const panel=document.createElement('section');
-  panel.className='panel';
-  panel.dataset.webuiPanel=host.webUIId;
-  panel.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
-  if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
-   const actorSection=document.createElement('section');
-   actorSection.className='component';
-   actorSection.innerHTML='<h3>Actor</h3>';
-   if((host.actorProperties||[]).length){
+   const panel=document.createElement('section');
+   panel.className='panel';
+   panel.dataset.webuiPanel=host.webUIId;
+   const panelHeader=document.createElement('div');
+   panelHeader.className='panel-header';
+   panelHeader.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+   const panelBody=document.createElement('div');
+   panelBody.className='panel-body';
+   panelBody.dataset.webuiBody=host.webUIId;
+   bodyByWebUIId.set(host.webUIId,panelBody);
+   if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
+    const actorSection=document.createElement('section');
+    actorSection.className='component';
+    actorSection.innerHTML='<h3>Actor</h3>';
+    if((host.actorProperties||[]).length){
     actorSection.append(renderProperties(host,'actor','',host.actorProperties));
    }
    if((host.actorButtons||[]).length){
     actorSection.append(renderButtonRow(host,'actor','',host.actorButtons));
    }
-   if((host.hostButtons||[]).length){
-    actorSection.append(renderButtonRow(host,'host','',host.hostButtons));
+    if((host.hostButtons||[]).length){
+     actorSection.append(renderButtonRow(host,'host','',host.hostButtons));
+    }
+    panelBody.append(actorSection);
    }
-   panel.append(actorSection);
-  }
-  for(const c of host.components||[]){
-   panel.append(renderComponent(host,c));
-  }
+   for(const c of host.components||[]){
+    panelBody.append(renderComponent(host,c));
+   }
+   panel.append(panelHeader,panelBody);
    panels.append(panel);
   }
-  panelScroll.append(panels);
+  panelScrollHost.append(panels);
   setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
-  requestAnimationFrame(()=>{
-   panelScroll.scrollTop=restoreScrollTop;
-  });
  }
  load();
 </script>
