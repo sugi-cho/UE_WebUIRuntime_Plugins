@@ -13,6 +13,7 @@ public class WebUIRuntime : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"EngineSettings",
+				"ImageWrapper",
 				"Json",
 				"DeveloperSettings",
 				"UMG",
@@ -25,6 +26,8 @@ public class WebUIRuntime : ModuleRules
 			{
 				"HTTPServer",
 				"JsonUtilities",
+				"RenderCore",
+				"RHI",
 				"Slate",
 				"SlateCore"
 			}

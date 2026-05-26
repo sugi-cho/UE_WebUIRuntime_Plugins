@@ -5,6 +5,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GeneralProjectSettings.h"
+#include "ImageUtils.h"
 #include "Misc/PackageName.h"
 #include "HttpPath.h"
 #include "HttpServerModule.h"
@@ -15,6 +16,9 @@
 #include "Math/Color.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Serialization/JsonSerializer.h"
+#include "Engine/Texture.h"
+#include "Engine/Texture2D.h"
+#include "Engine/TextureRenderTarget2D.h"
 #if WITH_EDITOR
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "K2Node_EditablePinBase.h"
@@ -23,6 +27,7 @@
 #include "WebUIComponentBase.h"
 #include "WebUIHostActor.h"
 #include "WebUIHostComponent.h"
+#include "WebUIImageComponent.h"
 #include "WebUIRuntimeSaveGame.h"
 #include "WebUIRuntimeSettings.h"
 #include "WebUIRuntime.h"
@@ -31,6 +36,83 @@ namespace
 {
 	const FString JsonContentType = TEXT("application/json; charset=utf-8");
 	const FString HtmlContentType = TEXT("text/html; charset=utf-8");
+	const FString PngContentType = TEXT("image/png");
+
+	FString UrlEncodeQueryValue(const FString& Value)
+	{
+		FTCHARToUTF8 Converted(*Value);
+		FString Encoded;
+		Encoded.Reserve(Value.Len() * 3);
+
+		for (int32 Index = 0; Index < Converted.Length(); ++Index)
+		{
+			const uint8 Byte = static_cast<uint8>(Converted.Get()[Index]);
+			const bool bIsUnreserved =
+				(Byte >= 'A' && Byte <= 'Z') ||
+				(Byte >= 'a' && Byte <= 'z') ||
+				(Byte >= '0' && Byte <= '9') ||
+				Byte == '-' ||
+				Byte == '_' ||
+				Byte == '.' ||
+				Byte == '~';
+
+			if (bIsUnreserved)
+			{
+				Encoded.AppendChar(static_cast<TCHAR>(Byte));
+			}
+			else
+			{
+				Encoded += FString::Printf(TEXT("%%%02X"), Byte);
+			}
+		}
+
+		return Encoded;
+	}
+
+	void AppendQueryParameter(FString& InURL, const FString& Key, const FString& Value)
+	{
+		if (Key.IsEmpty() || Value.IsEmpty())
+		{
+			return;
+		}
+
+		const FString EncodedValue = UrlEncodeQueryValue(Value);
+		if (InURL.Contains(TEXT("?")))
+		{
+			if (!InURL.EndsWith(TEXT("?")) && !InURL.EndsWith(TEXT("&")))
+			{
+				InURL.AppendChar(TEXT('&'));
+			}
+		}
+		else
+		{
+			InURL.AppendChar(TEXT('?'));
+		}
+
+		InURL += Key;
+		InURL.AppendChar(TEXT('='));
+		InURL += EncodedValue;
+	}
+
+	TSharedPtr<FJsonObject> MakeImageObject(const FString& WebUIId, const UWebUIImageComponent* ImageComponent)
+	{
+		if (!IsValid(ImageComponent) || !ImageComponent->SourceTexture)
+		{
+			return nullptr;
+		}
+
+		TSharedRef<FJsonObject> ImageObject = MakeShared<FJsonObject>();
+		ImageObject->SetStringField(TEXT("componentId"), ImageComponent->GetName());
+		ImageObject->SetStringField(TEXT("slot"), StaticEnum<EWebUIImageSlot>()->GetNameStringByValue(static_cast<int64>(ImageComponent->WebUIImageSlot)));
+		ImageObject->SetStringField(TEXT("label"), ImageComponent->GetName());
+		ImageObject->SetStringField(TEXT("sourceKind"), ImageComponent->SourceTexture->IsA<UTextureRenderTarget2D>() ? TEXT("renderTarget") : TEXT("texture2d"));
+		FString ImageUrl = TEXT("/api/webui/image");
+		AppendQueryParameter(ImageUrl, TEXT("webuiId"), WebUIId);
+		AppendQueryParameter(ImageUrl, TEXT("componentId"), ImageComponent->GetName());
+		ImageObject->SetStringField(TEXT("imageUrl"), MoveTemp(ImageUrl));
+		ImageObject->SetNumberField(TEXT("refreshMs"), ImageComponent->SourceTexture->IsA<UTextureRenderTarget2D>() ? 250 : 0);
+		return ImageObject;
+	}
 
 	FString BuildWebUIHtml()
 	{
@@ -128,6 +210,20 @@ button.webui-button.pressed{background:var(--button-bg-pressed);border-color:#8a
 button.webui-button:disabled{opacity:.72;cursor:default}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
+)HTML");
+		Html += TEXT(R"HTML(
+.preview-strip{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 12px}
+.preview-frame,.inline-image-frame,.icon-frame{border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,.22);overflow:hidden}
+.preview-frame{flex:1 1 240px;min-width:220px}
+.preview-frame img,.inline-image-frame img,.icon-frame img{display:block;width:100%;height:100%;object-fit:contain}
+.preview-frame img{max-height:220px;aspect-ratio:16/9}
+.inline-image-list{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 0}
+.inline-image-frame{flex:0 1 240px;min-width:160px;max-width:320px}
+.inline-image-frame img{max-height:180px;aspect-ratio:4/3}
+.icon-frame{width:28px;height:28px;flex:0 0 28px}
+.icon-frame img{width:100%;height:100%}
+.tab-label{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.tab-label-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  body.compact .tabs{margin-top:0}
  body.compact .panel-header{padding:12px 12px 0}
  body.compact .panel-body{padding:0 12px 12px}
@@ -223,6 +319,41 @@ function isHostVisibleForCurrentSurface(host){
  const target=String(host.displayTarget || 'Both');
  if(target==='Both'){return true;}
  return isWidgetView ? target==='WidgetOnly' : target==='BrowserOnly';
+}
+let imageRefreshTimers=[];
+function clearImageRefreshTimers(){
+ for(const timer of imageRefreshTimers){
+  clearInterval(timer);
+ }
+ imageRefreshTimers=[];
+}
+function refreshImageSrc(img,url){
+ img.src=url;
+}
+function renderImageFrame(image,variant){
+ const frame=document.createElement('div');
+ frame.className=variant==='preview' ? 'preview-frame' : variant==='inline' ? 'inline-image-frame' : 'icon-frame';
+ const img=document.createElement('img');
+ img.alt=image.label || image.slot || 'WebUI image';
+ const sourceUrl=String(image.imageUrl || '');
+ img.src=sourceUrl;
+ frame.append(img);
+ const refreshMs=Number(image.refreshMs || 0);
+ if(refreshMs > 0 && sourceUrl){
+  const timer=setInterval(()=>{
+   refreshImageSrc(img,`${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}_ts=${Date.now()}`);
+  }, refreshMs);
+  imageRefreshTimers.push(timer);
+ }
+ return frame;
+}
+function renderImageStrip(images,variant){
+ const strip=document.createElement('div');
+ strip.className=variant==='preview' ? 'preview-strip' : 'inline-image-list';
+ for(const image of images||[]){
+  strip.append(renderImageFrame(image,variant));
+ }
+ return strip;
 }
 function renderOptionPicker(currentValue,options,onCommit){
  const picker=document.createElement('div');
@@ -610,6 +741,10 @@ function renderComponent(host,c){
  cs.className='component';
  cs.innerHTML=`<h3>${c.name}</h3>`;
  cs.append(renderProperties(host,'component',c.componentId,c.properties));
+ const inlineImages=(c.images||[]).filter(image=>String(image.slot||'')==='Inline');
+ if(inlineImages.length){
+  cs.append(renderImageStrip(inlineImages,'inline'));
+ }
  const buttonRow=renderButtonRow(host,'component',c.componentId,c.buttons);
  if(c.buttons.length){ cs.append(buttonRow); }
  return cs;
@@ -619,6 +754,7 @@ async function load(){
  const restoreScrollTop=scrollContainer ? scrollContainer.scrollTop : 0;
  scrollContainer=null;
  setScrollingState(false);
+ clearImageRefreshTimers();
  const schema=await (await fetch('/api/webui/schema')).json();
  tabsHost.innerHTML='';
  panelScrollHost.innerHTML='';
@@ -658,7 +794,19 @@ async function load(){
   tab.className='tab';
   tab.type='button';
   tab.dataset.webuiId=host.webUIId;
-  tab.textContent=host.webUIId;
+  const iconImages=(host.images||[]).filter(image=>String(image.slot||'')==='Icon');
+  if(iconImages.length){
+   const label=document.createElement('span');
+   label.className='tab-label';
+   const iconWrap=renderImageFrame(iconImages[0],'icon');
+   const text=document.createElement('span');
+   text.className='tab-label-text';
+   text.textContent=host.webUIId;
+   label.append(iconWrap,text);
+   tab.append(label);
+  }else{
+   tab.textContent=host.webUIId;
+  }
   tab.onclick=()=>setActive(host.webUIId);
    tabsHost.append(tab);
 
@@ -668,6 +816,10 @@ async function load(){
    const panelHeader=document.createElement('div');
    panelHeader.className='panel-header';
    panelHeader.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+   const previewImages=(host.images||[]).filter(image=>String(image.slot||'')==='Preview');
+   if(previewImages.length){
+    panelHeader.append(renderImageStrip(previewImages,'preview'));
+   }
    const panelBody=document.createElement('div');
    panelBody.className='panel-body';
    panelBody.dataset.webuiBody=host.webUIId;
@@ -1148,6 +1300,7 @@ bool UWebUIRuntimeSubsystem::StartServer(int32 Port)
 
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/webui")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleWebUI)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/schema")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleSchema)));
+	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/image")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleImage)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/property")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleProperty)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/action")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleAction)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/button")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleButton)));
@@ -1239,6 +1392,36 @@ bool UWebUIRuntimeSubsystem::HandleWebUI(const FHttpServerRequest& Request, cons
 bool UWebUIRuntimeSubsystem::HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
 {
 	OnComplete(MakeJsonResponse(BuildSchema()));
+	return true;
+}
+
+bool UWebUIRuntimeSubsystem::HandleImage(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
+{
+	const FString WebUIId = Request.QueryParams.FindRef(TEXT("webuiId"));
+	const FString ComponentId = Request.QueryParams.FindRef(TEXT("componentId"));
+	if (WebUIId.IsEmpty() || ComponentId.IsEmpty())
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Missing image query parameters"))));
+		return true;
+	}
+
+	UActorComponent* Component = FindComponent(WebUIId, ComponentId);
+	UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component);
+	if (!ImageComponent || !ImageComponent->SourceTexture)
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Image component not found"))));
+		return true;
+	}
+
+	FString Error;
+	TUniquePtr<FHttpServerResponse> Response = MakeImageResponse(ImageComponent->SourceTexture, Error);
+	if (!Response)
+	{
+		OnComplete(MakeJsonResponse(MakeErrorObject(Error.IsEmpty() ? TEXT("Failed to build image response") : Error)));
+		return true;
+	}
+
+	OnComplete(MoveTemp(Response));
 	return true;
 }
 
@@ -1419,6 +1602,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		}
 
 		TArray<TSharedPtr<FJsonValue>> ComponentValues;
+		TArray<TSharedPtr<FJsonValue>> HostImageValues;
 		TArray<UActorComponent*> Components;
 		Host->GetOwner()->GetComponents(Components);
 		for (UActorComponent* Component : Components)
@@ -1427,13 +1611,19 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 			{
 				continue;
 			}
-			if (TSharedPtr<FJsonObject> ComponentObject = BuildComponentSchema(Component))
+			if (TSharedPtr<FJsonObject> ComponentObject = BuildComponentSchema(Component, Host->GetWebUIId()))
 			{
 				ComponentValues.Add(MakeShared<FJsonValueObject>(ComponentObject));
+				const TArray<TSharedPtr<FJsonValue>>& Images = ComponentObject->GetArrayField(TEXT("images"));
+				for (const TSharedPtr<FJsonValue>& ImageValue : Images)
+				{
+					HostImageValues.Add(ImageValue);
+				}
 			}
 		}
 
 		HostObject->SetArrayField(TEXT("components"), ComponentValues);
+		HostObject->SetArrayField(TEXT("images"), HostImageValues);
 		HostValues.Add(MakeShared<FJsonValueObject>(HostObject));
 	}
 
@@ -1486,7 +1676,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 	return ActorObject;
 }
 
-TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorComponent* Component) const
+TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorComponent* Component, const FString& WebUIId) const
 {
 	if (!IsValid(Component))
 	{
@@ -1532,7 +1722,16 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		}
 	}
 
-	if (PropertyValues.IsEmpty() && ButtonValues.IsEmpty())
+	TArray<TSharedPtr<FJsonValue>> ImageValues;
+	if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
+	{
+		if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(WebUIId, ImageComponent))
+		{
+			ImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
+		}
+	}
+
+	if (PropertyValues.IsEmpty() && ButtonValues.IsEmpty() && ImageValues.IsEmpty())
 	{
 		return nullptr;
 	}
@@ -1543,6 +1742,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	ComponentObject->SetStringField(TEXT("className"), Component->GetClass()->GetName());
 	ComponentObject->SetArrayField(TEXT("properties"), PropertyValues);
 	ComponentObject->SetArrayField(TEXT("buttons"), ButtonValues);
+	ComponentObject->SetArrayField(TEXT("images"), ImageValues);
 	return ComponentObject;
 }
 
@@ -2018,6 +2218,132 @@ TSharedPtr<FJsonValue> UWebUIRuntimeSubsystem::DeserializeJsonValue(const FStrin
 	}
 
 	return Value;
+}
+
+FString UWebUIRuntimeSubsystem::BuildImageUrl(const FString& WebUIId, const FString& ComponentId) const
+{
+	FString ImageUrl = TEXT("/api/webui/image");
+	AppendQueryParameter(ImageUrl, TEXT("webuiId"), WebUIId);
+	AppendQueryParameter(ImageUrl, TEXT("componentId"), ComponentId);
+	return ImageUrl;
+}
+
+bool UWebUIRuntimeSubsystem::TryGetTexturePixels(UTexture* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError) const
+{
+	OutPixels.Reset();
+	OutWidth = 0;
+	OutHeight = 0;
+
+	if (!Texture)
+	{
+		OutError = TEXT("Missing texture");
+		return false;
+	}
+
+	if (UTextureRenderTarget2D* RenderTarget = Cast<UTextureRenderTarget2D>(Texture))
+	{
+		FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
+		if (!Resource)
+		{
+			OutError = TEXT("Render target resource is not ready");
+			return false;
+		}
+
+		OutWidth = RenderTarget->SizeX;
+		OutHeight = RenderTarget->SizeY;
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			OutError = TEXT("Render target has invalid size");
+			return false;
+		}
+
+		FReadSurfaceDataFlags Flags(RCM_UNorm);
+		Flags.SetLinearToGamma(false);
+		if (!Resource->ReadPixels(OutPixels, Flags))
+		{
+			OutError = TEXT("Failed to read render target pixels");
+			return false;
+		}
+
+		return true;
+	}
+
+	if (UTexture2D* Texture2D = Cast<UTexture2D>(Texture))
+	{
+		const FTexturePlatformData* PlatformData = Texture2D->GetPlatformData();
+		if (!PlatformData || PlatformData->Mips.Num() <= 0)
+		{
+			OutError = TEXT("Texture data is not available");
+			return false;
+		}
+
+		const FTexture2DMipMap& Mip = PlatformData->Mips[0];
+		OutWidth = Texture2D->GetSizeX();
+		OutHeight = Texture2D->GetSizeY();
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			OutError = TEXT("Texture has invalid size");
+			return false;
+		}
+
+		const void* MipData = Mip.BulkData.LockReadOnly();
+		if (!MipData)
+		{
+			OutError = TEXT("Failed to lock texture data");
+			return false;
+		}
+
+		const int64 PixelCount = static_cast<int64>(OutWidth) * static_cast<int64>(OutHeight);
+		OutPixels.SetNumUninitialized(static_cast<int32>(PixelCount));
+		if (PlatformData->PixelFormat == PF_B8G8R8A8 || PlatformData->PixelFormat == PF_A8R8G8B8)
+		{
+			FMemory::Memcpy(OutPixels.GetData(), MipData, PixelCount * sizeof(FColor));
+		}
+		else if (PlatformData->PixelFormat == PF_R8G8B8A8)
+		{
+			const uint8* Bytes = static_cast<const uint8*>(MipData);
+			for (int32 Index = 0; Index < OutPixels.Num(); ++Index)
+			{
+				const int32 Offset = Index * 4;
+				OutPixels[Index] = FColor(Bytes[Offset + 2], Bytes[Offset + 1], Bytes[Offset + 0], Bytes[Offset + 3]);
+			}
+		}
+		else
+		{
+			Mip.BulkData.Unlock();
+			OutError = FString::Printf(TEXT("Unsupported texture pixel format: %d"), static_cast<int32>(PlatformData->PixelFormat));
+			return false;
+		}
+
+		Mip.BulkData.Unlock();
+		return true;
+	}
+
+	OutError = TEXT("Unsupported texture type");
+	return false;
+}
+
+TUniquePtr<FHttpServerResponse> UWebUIRuntimeSubsystem::MakeImageResponse(UTexture* Texture, FString& OutError) const
+{
+	TArray<FColor> Pixels;
+	int32 Width = 0;
+	int32 Height = 0;
+	if (!TryGetTexturePixels(Texture, Pixels, Width, Height, OutError))
+	{
+		return nullptr;
+	}
+
+	TArray64<uint8> CompressedBytes64;
+	FImageUtils::PNGCompressImageArray(Width, Height, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), CompressedBytes64);
+	if (CompressedBytes64.IsEmpty())
+	{
+		OutError = TEXT("Failed to encode image");
+		return nullptr;
+	}
+
+	TArray<uint8> CompressedBytes;
+	CompressedBytes.Append(CompressedBytes64.GetData(), CompressedBytes64.Num());
+	return FHttpServerResponse::Create(MoveTemp(CompressedBytes), PngContentType);
 }
 
 void UWebUIRuntimeSubsystem::SavePersistedState(UWebUIHostComponent* Host)

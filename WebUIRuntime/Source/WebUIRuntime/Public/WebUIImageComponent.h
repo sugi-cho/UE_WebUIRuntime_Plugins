@@ -1,0 +1,29 @@
+#pragma once
+
+#include "WebUIComponentBase.h"
+#include "WebUIImageComponent.generated.h"
+
+class UTexture;
+
+UENUM(BlueprintType)
+enum class EWebUIImageSlot : uint8
+{
+	Preview UMETA(DisplayName="Preview"),
+	Icon UMETA(DisplayName="Icon"),
+	Inline UMETA(DisplayName="Inline")
+};
+
+UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
+class WEBUIRUNTIME_API UWebUIImageComponent : public UWebUIComponentBase
+{
+	GENERATED_BODY()
+
+public:
+	UWebUIImageComponent();
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image")
+	EWebUIImageSlot WebUIImageSlot = EWebUIImageSlot::Preview;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image")
+	TObjectPtr<UTexture> SourceTexture;
+};

@@ -11,6 +11,7 @@ class IHttpRouter;
 class AActor;
 class UActorComponent;
 class UWebUIHostComponent;
+class UTexture;
 struct FHttpServerRequest;
 
 UCLASS()
@@ -45,15 +46,19 @@ private:
 	bool StartServer(int32 Port);
 	bool HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
+	bool HandleImage(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleProperty(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleButton(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleAction(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 
 	TSharedRef<FJsonObject> BuildSchema() const;
 	TSharedPtr<FJsonObject> BuildActorSchema(AActor* Actor) const;
-	TSharedPtr<FJsonObject> BuildComponentSchema(UActorComponent* Component) const;
+	TSharedPtr<FJsonObject> BuildComponentSchema(UActorComponent* Component, const FString& WebUIId) const;
 	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
+	FString BuildImageUrl(const FString& WebUIId, const FString& ComponentId) const;
+	TUniquePtr<struct FHttpServerResponse> MakeImageResponse(UTexture* Texture, FString& OutError) const;
+	bool TryGetTexturePixels(UTexture* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError) const;
 
 	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange = true);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
