@@ -17,12 +17,10 @@ AWebUIHostActor::AWebUIHostActor()
 void AWebUIHostActor::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
-	SyncHostComponent();
 }
 
 void AWebUIHostActor::BeginPlay()
 {
-	SyncHostComponent();
 	Super::BeginPlay();
 }
 
@@ -30,7 +28,6 @@ bool AWebUIHostActor::StartWebUIServer()
 {
 	if (WebUIHostComponent)
 	{
-		SyncHostComponent();
 		return WebUIHostComponent->StartWebUIServer();
 	}
 	return false;
@@ -51,17 +48,17 @@ UWebUIHostComponent* AWebUIHostActor::GetWebUIHostComponent() const
 
 FString AWebUIHostActor::GetWebUIId() const
 {
-	return WebUIId.IsEmpty() ? GetName() : WebUIId;
+	return WebUIHostComponent ? WebUIHostComponent->GetWebUIId() : GetName();
 }
 
 FString AWebUIHostActor::GetDescription() const
 {
-	return Description.IsEmpty() ? GetName() : Description;
+	return WebUIHostComponent ? WebUIHostComponent->GetDescription() : GetName();
 }
 
 bool AWebUIHostActor::ShouldAutoStartServer() const
 {
-	return bAutoStartServer;
+	return WebUIHostComponent ? WebUIHostComponent->bAutoStartServer : true;
 }
 
 void AWebUIHostActor::RegisterWebUIButton(FName ButtonId)
@@ -98,20 +95,6 @@ void AWebUIHostActor::NotifyWebUIButtonClicked(FName ButtonId)
 {
 	OnWebUIButtonClicked.Broadcast(ButtonId);
 	K2_OnWebUIButtonClicked(ButtonId);
-}
-
-void AWebUIHostActor::SyncHostComponent() const
-{
-	if (!WebUIHostComponent)
-	{
-		return;
-	}
-
-	WebUIHostComponent->bAutoStartServer = bAutoStartServer;
-	WebUIHostComponent->WebUIId = WebUIId;
-	WebUIHostComponent->Description = Description;
-	WebUIHostComponent->bAutoSaveChangedValues = bAutoSaveChangedValues;
-	WebUIHostComponent->bAutoLoadSavedValues = bAutoLoadSavedValues;
 }
 
 FString AWebUIHostActor::GetBrowserURL() const

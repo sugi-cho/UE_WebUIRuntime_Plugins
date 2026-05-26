@@ -58,21 +58,6 @@ public:
 
 	void NotifyWebUIButtonClicked(FName ButtonId);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
-	bool bAutoStartServer = true;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
-	FString WebUIId;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host", meta=(MultiLine=true))
-	FString Description;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
-	bool bAutoSaveChangedValues = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
-	bool bAutoLoadSavedValues = true;
-
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
 	FOnWebUIHostActorButtonClicked OnWebUIButtonClicked;
 
@@ -80,8 +65,6 @@ public:
 	void K2_OnWebUIButtonClicked(FName ButtonId);
 
 private:
-	void SyncHostComponent() const;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="WebUI Host", meta=(AllowPrivateAccess="true"))
 	TObjectPtr<USceneComponent> SceneRootComponent;
 

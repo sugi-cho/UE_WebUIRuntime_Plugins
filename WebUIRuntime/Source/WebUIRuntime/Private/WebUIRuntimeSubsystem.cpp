@@ -167,6 +167,7 @@ const initialWebUIId=params.get('webuiId') || '';
 const isEmbed=params.get('embed')==='1';
 const isCompact=params.get('compact')==='1';
 const theme=(params.get('theme')||'dark').toLowerCase();
+const isWidgetView=isEmbed;
  let scrollContainer=null;
 let scrollStateTimer=null;
 document.body.classList.toggle('embed',isEmbed);
@@ -217,6 +218,11 @@ function createRow(p){
  control.className='property-control';
  row.append(name,control);
  return {label:row,control};
+}
+function isHostVisibleForCurrentSurface(host){
+ const target=String(host.displayTarget || 'Both');
+ if(target==='Both'){return true;}
+ return isWidgetView ? target==='WidgetOnly' : target==='BrowserOnly';
 }
 function renderOptionPicker(currentValue,options,onCommit){
  const picker=document.createElement('div');
@@ -616,11 +622,11 @@ async function load(){
  const schema=await (await fetch('/api/webui/schema')).json();
  tabsHost.innerHTML='';
  panelScrollHost.innerHTML='';
- const hosts=[...(schema.hosts||[])].sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
+ const hosts=[...(schema.hosts||[])].filter(isHostVisibleForCurrentSurface).sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
  if(!hosts.length){
   const empty=document.createElement('div');
   empty.className='empty';
-  empty.textContent='No WebUIHostComponent was found.';
+  empty.textContent=isWidgetView ? 'No WidgetOnly or Both WebUIHostComponent was found.' : 'No BrowserOnly or Both WebUIHostComponent was found.';
   panelScrollHost.append(empty);
   return;
  }
@@ -762,6 +768,12 @@ async function load(){
 		ButtonObject->SetStringField(TEXT("label"), Label);
 		ButtonObject->SetStringField(TEXT("kind"), Kind);
 		return ButtonObject;
+	}
+
+	FString GetWebUIHostVisibilityString(EWebUIHostVisibility Visibility)
+	{
+		const UEnum* Enum = StaticEnum<EWebUIHostVisibility>();
+		return Enum ? Enum->GetNameStringByValue(static_cast<int64>(Visibility)) : TEXT("Both");
 	}
 
 	TSharedRef<FJsonObject> MakeOptionObject(const FString& Value, const FString& Label)
@@ -1394,6 +1406,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		HostObject->SetStringField(TEXT("webUIId"), Host->GetWebUIId());
 		HostObject->SetStringField(TEXT("actorName"), Host->GetOwner()->GetName());
 		HostObject->SetStringField(TEXT("description"), Host->GetDescription());
+		HostObject->SetStringField(TEXT("displayTarget"), GetWebUIHostVisibilityString(Host->DisplayTarget));
 		TArray<TSharedPtr<FJsonValue>> HostButtonValues;
 		for (const FName Button : Host->GetWebUIButtons())
 		{

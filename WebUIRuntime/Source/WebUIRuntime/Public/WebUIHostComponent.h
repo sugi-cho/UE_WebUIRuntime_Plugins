@@ -16,6 +16,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIHostButtonClicked, FName, Bu
 class UWebUIRuntimeSubsystem;
 class AWebUIHostActor;
 
+UENUM(BlueprintType)
+enum class EWebUIHostVisibility : uint8
+{
+	BrowserOnly UMETA(DisplayName="Browser Only"),
+	WidgetOnly UMETA(DisplayName="Widget Only"),
+	Both UMETA(DisplayName="Both")
+};
+
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
 class WEBUIRUNTIME_API UWebUIHostComponent : public UActorComponent
 {
@@ -84,6 +92,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
 	bool bAutoLoadSavedValues = true;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Host")
+	EWebUIHostVisibility DisplayTarget = EWebUIHostVisibility::Both;
+
 	UPROPERTY(BlueprintAssignable, Category="WebUI")
 	FOnWebUIHostPropertyChanged OnWebUIPropertyChanged;
 
@@ -113,10 +124,6 @@ public:
 
 private:
 	UWebUIRuntimeSubsystem* GetRuntimeSubsystem() const;
-	void RefreshOwnerSettingsMode();
-
-	UPROPERTY(Transient)
-	bool bUseActorSettings = false;
 
 	UPROPERTY(EditAnywhere, Category="WebUI Host")
 	TArray<FName> WebUIButtons;

@@ -13,19 +13,15 @@ UWebUIHostComponent::UWebUIHostComponent()
 void UWebUIHostComponent::PostInitProperties()
 {
 	Super::PostInitProperties();
-	RefreshOwnerSettingsMode();
 }
 
 void UWebUIHostComponent::PostLoad()
 {
 	Super::PostLoad();
-	RefreshOwnerSettingsMode();
 }
 
 void UWebUIHostComponent::OnRegister()
 {
-	RefreshOwnerSettingsMode();
-
 	if (AActor* Owner = GetOwner())
 	{
 		if (!Owner->IsTemplate())
@@ -48,9 +44,7 @@ void UWebUIHostComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner());
-
-	if (WebUIId.IsEmpty() && GetOwner() && !HostActor)
+	if (WebUIId.IsEmpty() && GetOwner())
 	{
 		WebUIId = GetOwner()->GetName();
 	}
@@ -62,8 +56,7 @@ void UWebUIHostComponent::BeginPlay()
 		{
 			Runtime->LoadPersistedState(this);
 		}
-		const bool bShouldAutoStart = HostActor ? HostActor->ShouldAutoStartServer() : bAutoStartServer;
-		if (bShouldAutoStart)
+		if (bAutoStartServer)
 		{
 			Runtime->StartServerFromSettings();
 		}
@@ -108,10 +101,6 @@ void UWebUIHostComponent::StopWebUIServer()
 
 FString UWebUIHostComponent::GetWebUIId() const
 {
-	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
-	{
-		return HostActor->GetWebUIId();
-	}
 	if (!WebUIId.IsEmpty())
 	{
 		return WebUIId;
@@ -126,10 +115,6 @@ int32 UWebUIHostComponent::GetWebUIPort() const
 
 FString UWebUIHostComponent::GetDescription() const
 {
-	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
-	{
-		return HostActor->GetDescription();
-	}
 	if (!Description.IsEmpty())
 	{
 		return Description;
@@ -207,19 +192,11 @@ void UWebUIHostComponent::NotifyWebUIButtonClicked(FName ButtonId)
 
 bool UWebUIHostComponent::IsAutoSaveChangedValuesEnabled() const
 {
-	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
-	{
-		return HostActor->bAutoSaveChangedValues;
-	}
 	return bAutoSaveChangedValues;
 }
 
 bool UWebUIHostComponent::ShouldAutoLoadSavedValues() const
 {
-	if (const AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(GetOwner()))
-	{
-		return HostActor->bAutoLoadSavedValues;
-	}
 	return bAutoLoadSavedValues;
 }
 
@@ -227,10 +204,4 @@ UWebUIRuntimeSubsystem* UWebUIHostComponent::GetRuntimeSubsystem() const
 {
 	const UWorld* World = GetWorld();
 	return World ? World->GetSubsystem<UWebUIRuntimeSubsystem>() : nullptr;
-}
-
-void UWebUIHostComponent::RefreshOwnerSettingsMode()
-{
-	const AActor* OwnerActor = GetOwner() ? GetOwner() : GetTypedOuter<AActor>();
-	bUseActorSettings = Cast<AWebUIHostActor>(OwnerActor) != nullptr;
 }
