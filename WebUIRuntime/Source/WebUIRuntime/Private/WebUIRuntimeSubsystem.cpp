@@ -22,8 +22,11 @@
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
+#include "Engine/Canvas.h"
 #include "Modules/ModuleManager.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #include "WebUIRuntimeTextureReader.h"
+#include "UObject/StrongObjectPtr.h"
 #include "WebSocketNetworkingDelegates.h"
 #include "IWebSocketNetworkingModule.h"
 #include "IWebSocketServer.h"
@@ -46,6 +49,9 @@ namespace
 	const FString JsonContentType = TEXT("application/json; charset=utf-8");
 	const FString HtmlContentType = TEXT("text/html; charset=utf-8");
 	const FString PngContentType = TEXT("image/png");
+	TStrongObjectPtr<UTextureRenderTarget2D> GStreamingScratchRenderTarget;
+	int32 GStreamingScratchWidth = 0;
+	int32 GStreamingScratchHeight = 0;
 
 	class FWebUIWebSocketConnection
 	{
@@ -314,6 +320,200 @@ namespace
 		ImageObject->SetBoolField(TEXT("streaming"), bIsRenderTarget || bIsNDITexture);
 		ImageObject->SetNumberField(TEXT("refreshMs"), bIsRenderTarget && !bUseWebSocketStreaming ? 250 : 0);
 		return ImageObject;
+	}
+
+	int32 GetMaxStreamingImageDimension()
+	{
+		const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+		return Settings ? FMath::Max(64, Settings->MaxStreamingImageDimension) : 512;
+	}
+
+	bool GetTextureSourceSize(UTexture* Texture, int32& OutWidth, int32& OutHeight, FString& OutError)
+	{
+		OutWidth = 0;
+		OutHeight = 0;
+
+		if (!Texture)
+		{
+			OutError = TEXT("Missing texture");
+			return false;
+		}
+
+		if (const UTextureRenderTarget2D* RenderTarget = Cast<UTextureRenderTarget2D>(Texture))
+		{
+			OutWidth = RenderTarget->SizeX;
+			OutHeight = RenderTarget->SizeY;
+		}
+		else
+		{
+			OutWidth = Texture->GetSurfaceWidth();
+			OutHeight = Texture->GetSurfaceHeight();
+		}
+
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			OutError = TEXT("Texture has invalid size");
+			return false;
+		}
+
+		return true;
+	}
+
+	bool GetStreamingBakeSize(int32 SourceWidth, int32 SourceHeight, int32 MaxDimension, int32& OutWidth, int32& OutHeight)
+	{
+		if (SourceWidth <= 0 || SourceHeight <= 0)
+		{
+			return false;
+		}
+
+		const int32 LargestDimension = FMath::Max(SourceWidth, SourceHeight);
+		if (LargestDimension <= MaxDimension)
+		{
+			OutWidth = SourceWidth;
+			OutHeight = SourceHeight;
+			return true;
+		}
+
+		const float Scale = static_cast<float>(MaxDimension) / static_cast<float>(LargestDimension);
+		OutWidth = FMath::Max(1, FMath::RoundToInt(static_cast<float>(SourceWidth) * Scale));
+		OutHeight = FMath::Max(1, FMath::RoundToInt(static_cast<float>(SourceHeight) * Scale));
+		return true;
+	}
+
+	UTextureRenderTarget2D* GetOrCreateStreamingScratchRenderTarget(UObject* WorldContextObject, int32 Width, int32 Height)
+	{
+		if (!WorldContextObject || Width <= 0 || Height <= 0)
+		{
+			return nullptr;
+		}
+
+		UTextureRenderTarget2D* ScratchRenderTarget = GStreamingScratchRenderTarget.Get();
+		if (!ScratchRenderTarget || GStreamingScratchWidth != Width || GStreamingScratchHeight != Height)
+		{
+			ScratchRenderTarget = NewObject<UTextureRenderTarget2D>(GetTransientPackage());
+			if (!ScratchRenderTarget)
+			{
+				return nullptr;
+			}
+
+			ScratchRenderTarget->ClearColor = FLinearColor::Transparent;
+			ScratchRenderTarget->InitCustomFormat(Width, Height, PF_B8G8R8A8, false);
+			ScratchRenderTarget->UpdateResourceImmediate(true);
+
+			GStreamingScratchRenderTarget.Reset(ScratchRenderTarget);
+			GStreamingScratchWidth = Width;
+			GStreamingScratchHeight = Height;
+		}
+
+		return ScratchRenderTarget;
+	}
+
+	bool ReadPixelsFromRenderTarget(UTextureRenderTarget2D* RenderTarget, bool bForceOpaqueRenderTargetImage, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError)
+	{
+		if (!RenderTarget)
+		{
+			OutError = TEXT("Missing render target");
+			return false;
+		}
+
+		FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
+		if (!Resource)
+		{
+			OutError = TEXT("Render target resource is not ready");
+			return false;
+		}
+
+		OutWidth = RenderTarget->SizeX;
+		OutHeight = RenderTarget->SizeY;
+		if (OutWidth <= 0 || OutHeight <= 0)
+		{
+			OutError = TEXT("Render target has invalid size");
+			return false;
+		}
+
+		OutPixels.Reset();
+		FReadSurfaceDataFlags Flags(RCM_UNorm);
+		Flags.SetLinearToGamma(false);
+		if (!Resource->ReadPixels(OutPixels, Flags))
+		{
+			OutError = TEXT("Failed to read render target pixels");
+			return false;
+		}
+
+		if (bForceOpaqueRenderTargetImage)
+		{
+			for (FColor& Pixel : OutPixels)
+			{
+				Pixel.A = 255;
+			}
+		}
+
+		return true;
+	}
+
+	bool BakeTextureToStreamingScratchRenderTarget(UObject* WorldContextObject, UTexture* Texture, int32 TargetWidth, int32 TargetHeight, bool bForceOpaqueRenderTargetImage, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError)
+	{
+		UTextureRenderTarget2D* ScratchRenderTarget = GetOrCreateStreamingScratchRenderTarget(WorldContextObject, TargetWidth, TargetHeight);
+		if (!ScratchRenderTarget)
+		{
+			OutError = TEXT("Failed to create streaming scratch render target");
+			return false;
+		}
+
+	UCanvas* Canvas = nullptr;
+	FVector2D CanvasSize;
+	FDrawToRenderTargetContext Context;
+	UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(WorldContextObject, ScratchRenderTarget, Canvas, CanvasSize, Context);
+	if (!Canvas)
+	{
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(WorldContextObject, Context);
+		OutError = TEXT("Failed to begin draw on streaming scratch render target");
+		return false;
+	}
+
+		const int32 SourceWidth = FMath::Max(1, Texture->GetSurfaceWidth());
+		const int32 SourceHeight = FMath::Max(1, Texture->GetSurfaceHeight());
+		const EBlendMode BlendMode = bForceOpaqueRenderTargetImage ? BLEND_Opaque : BLEND_Translucent;
+		Canvas->DrawTile(Texture, 0.0f, 0.0f, static_cast<float>(TargetWidth), static_cast<float>(TargetHeight), 0.0f, 0.0f, static_cast<float>(SourceWidth), static_cast<float>(SourceHeight), BlendMode);
+		UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(WorldContextObject, Context);
+
+		return ReadPixelsFromRenderTarget(ScratchRenderTarget, bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError);
+	}
+
+	bool TryReadTexturePixelsForStreaming(UObject* WorldContextObject, UTexture* Texture, bool bForceOpaqueRenderTargetImage, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError)
+	{
+		int32 SourceWidth = 0;
+		int32 SourceHeight = 0;
+		if (!GetTextureSourceSize(Texture, SourceWidth, SourceHeight, OutError))
+		{
+			return false;
+		}
+
+		const int32 MaxDimension = GetMaxStreamingImageDimension();
+		int32 TargetWidth = 0;
+		int32 TargetHeight = 0;
+		if (!GetStreamingBakeSize(SourceWidth, SourceHeight, MaxDimension, TargetWidth, TargetHeight))
+		{
+			OutError = TEXT("Failed to calculate streaming size");
+			return false;
+		}
+
+		if (const UTextureRenderTarget2D* RenderTarget = Cast<UTextureRenderTarget2D>(Texture))
+		{
+			if (SourceWidth <= MaxDimension && SourceHeight <= MaxDimension)
+			{
+				return ReadPixelsFromRenderTarget(const_cast<UTextureRenderTarget2D*>(RenderTarget), bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError);
+			}
+		}
+
+		if (!BakeTextureToStreamingScratchRenderTarget(WorldContextObject, Texture, TargetWidth, TargetHeight, bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError))
+		{
+			return false;
+		}
+
+		OutWidth = TargetWidth;
+		OutHeight = TargetHeight;
+		return true;
 	}
 
 	FString BuildWebUIHtml()
@@ -2656,38 +2856,7 @@ bool UWebUIRuntimeSubsystem::TryGetTexturePixels(UTexture* Texture, bool bForceO
 
 	if (UTextureRenderTarget2D* RenderTarget = Cast<UTextureRenderTarget2D>(Texture))
 	{
-		FTextureRenderTargetResource* Resource = RenderTarget->GameThread_GetRenderTargetResource();
-		if (!Resource)
-		{
-			OutError = TEXT("Render target resource is not ready");
-			return false;
-		}
-
-		OutWidth = RenderTarget->SizeX;
-		OutHeight = RenderTarget->SizeY;
-		if (OutWidth <= 0 || OutHeight <= 0)
-		{
-			OutError = TEXT("Render target has invalid size");
-			return false;
-		}
-
-		FReadSurfaceDataFlags Flags(RCM_UNorm);
-		Flags.SetLinearToGamma(false);
-		if (!Resource->ReadPixels(OutPixels, Flags))
-		{
-			OutError = TEXT("Failed to read render target pixels");
-			return false;
-		}
-
-		if (bForceOpaqueRenderTargetImage)
-		{
-			for (FColor& Pixel : OutPixels)
-			{
-				Pixel.A = 255;
-			}
-		}
-
-		return true;
+		return TryReadTexturePixelsForStreaming(GetWorld(), RenderTarget, bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError);
 	}
 
 	if (UTexture2D* Texture2D = Cast<UTexture2D>(Texture))
@@ -2699,9 +2868,21 @@ bool UWebUIRuntimeSubsystem::TryGetTexturePixels(UTexture* Texture, bool bForceO
 			return false;
 		}
 
-		const FTexture2DMipMap& Mip = PlatformData->Mips[0];
-		OutWidth = Texture2D->GetSizeX();
-		OutHeight = Texture2D->GetSizeY();
+		const int32 MaxDimension = GetMaxStreamingImageDimension();
+		int32 SelectedMipIndex = 0;
+		for (int32 MipIndex = 0; MipIndex < PlatformData->Mips.Num(); ++MipIndex)
+		{
+			const FTexture2DMipMap& CandidateMip = PlatformData->Mips[MipIndex];
+			if (FMath::Max(CandidateMip.SizeX, CandidateMip.SizeY) <= MaxDimension)
+			{
+				SelectedMipIndex = MipIndex;
+				break;
+			}
+		}
+
+		const FTexture2DMipMap& Mip = PlatformData->Mips[SelectedMipIndex];
+		OutWidth = Mip.SizeX;
+		OutHeight = Mip.SizeY;
 		if (OutWidth <= 0 || OutHeight <= 0)
 		{
 			OutError = TEXT("Texture has invalid size");
@@ -2741,9 +2922,9 @@ bool UWebUIRuntimeSubsystem::TryGetTexturePixels(UTexture* Texture, bool bForceO
 		return true;
 	}
 
-	if (FWebUIRuntimeTextureReaderRegistry::TryReadTexturePixels(Texture, bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError))
+	if (FWebUIRuntimeTextureReaderRegistry::CanReadTexture(Texture))
 	{
-		return true;
+		return TryReadTexturePixelsForStreaming(GetWorld(), Texture, bForceOpaqueRenderTargetImage, OutPixels, OutWidth, OutHeight, OutError);
 	}
 
 	if (!OutError.IsEmpty())
