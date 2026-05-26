@@ -49,9 +49,15 @@ namespace
 	const FString JsonContentType = TEXT("application/json; charset=utf-8");
 	const FString HtmlContentType = TEXT("text/html; charset=utf-8");
 	const FString PngContentType = TEXT("image/png");
+	const double RenderTargetStreamIntervalSeconds = 0.1;
 	TStrongObjectPtr<UTextureRenderTarget2D> GStreamingScratchRenderTarget;
 	int32 GStreamingScratchWidth = 0;
 	int32 GStreamingScratchHeight = 0;
+
+	FString BuildRenderTargetStreamKey(const FString& WebUIId, const FString& ComponentId, const FString& Slot)
+	{
+		return WebUIId + TEXT("::") + ComponentId + TEXT("::") + Slot;
+	}
 
 	class FWebUIWebSocketConnection
 	{
@@ -91,6 +97,53 @@ namespace
 			return SocketConnection->Send(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length(), false);
 		}
 
+		void SetSubscription(const FString& InWebUIId, const TArray<FString>& InImageKeys)
+		{
+			SubscribedWebUIId = InWebUIId;
+			SubscribedImageKeys.Reset();
+			for (const FString& ImageKey : InImageKeys)
+			{
+				if (!ImageKey.IsEmpty())
+				{
+					SubscribedImageKeys.Add(ImageKey);
+				}
+			}
+			StreamLastSentTimes.Reset();
+		}
+
+		void ClearSubscription()
+		{
+			SubscribedWebUIId.Reset();
+			SubscribedImageKeys.Reset();
+			StreamLastSentTimes.Reset();
+		}
+
+		bool WantsFrame(const FString& WebUIId, const FString& ImageKey) const
+		{
+			return !SubscribedWebUIId.IsEmpty() && SubscribedWebUIId == WebUIId && SubscribedImageKeys.Contains(ImageKey);
+		}
+
+		bool CanSendFrame(const FString& WebUIId, const FString& ImageKey, double Now, double StreamIntervalSeconds) const
+		{
+			if (!WantsFrame(WebUIId, ImageKey))
+			{
+				return false;
+			}
+
+			const double* LastSentTime = StreamLastSentTimes.Find(ImageKey);
+			return !LastSentTime || (Now - *LastSentTime) >= StreamIntervalSeconds;
+		}
+
+		void MarkFrameSent(const FString& ImageKey, double Now)
+		{
+			StreamLastSentTimes.Add(ImageKey, Now);
+		}
+
+		void ResetStreamingState()
+		{
+			StreamLastSentTimes.Reset();
+		}
+
 		void SetCallbacks()
 		{
 			if (SocketConnection)
@@ -107,6 +160,9 @@ namespace
 		static FThreadSafeCounter IdGenerator;
 		uint16 Id;
 		TArray<FString> UrlArgs;
+		FString SubscribedWebUIId;
+		TSet<FString> SubscribedImageKeys;
+		TMap<FString, double> StreamLastSentTimes;
 		INetworkingWebSocket* SocketConnection = nullptr;
 	};
 
@@ -177,17 +233,30 @@ class FWebUIRenderTargetWebSocketServer : public FTickableGameObject
 			return Connections.Num();
 		}
 
-		bool Broadcast(const FString& Message) const
+		void SendToSubscribedConnections(const FString& WebUIId, const FString& ImageKey, const FString& Message, double Now, double StreamIntervalSeconds)
 		{
-			bool bSentAny = false;
 			for (const TPair<uint16, TUniquePtr<FWebUIWebSocketConnection>>& Pair : Connections)
 			{
-				if (Pair.Value.IsValid())
+				if (Pair.Value.IsValid() && Pair.Value->CanSendFrame(WebUIId, ImageKey, Now, StreamIntervalSeconds))
 				{
-					bSentAny |= Pair.Value->Send(Message);
+					if (Pair.Value->Send(Message))
+					{
+						Pair.Value->MarkFrameSent(ImageKey, Now);
+					}
 				}
 			}
-			return bSentAny;
+		}
+
+		bool HasReadyConnectionForFrame(const FString& WebUIId, const FString& ImageKey, double Now, double StreamIntervalSeconds) const
+		{
+			for (const TPair<uint16, TUniquePtr<FWebUIWebSocketConnection>>& Pair : Connections)
+			{
+				if (Pair.Value.IsValid() && Pair.Value->CanSendFrame(WebUIId, ImageKey, Now, StreamIntervalSeconds))
+				{
+					return true;
+				}
+			}
+			return false;
 		}
 
 		virtual bool IsTickableWhenPaused() const override { return true; }
@@ -222,9 +291,64 @@ class FWebUIRenderTargetWebSocketServer : public FTickableGameObject
 
 		void OnPacketReceived(void* Data, int32 Size, uint16 ConnectionId)
 		{
-			(void)Data;
-			(void)Size;
-			(void)ConnectionId;
+			if (Size <= 0 || !Data)
+			{
+				return;
+			}
+
+			TUniquePtr<FWebUIWebSocketConnection>* ConnectionPtr = Connections.Find(ConnectionId);
+			if (!ConnectionPtr || !ConnectionPtr->IsValid())
+			{
+				return;
+			}
+			FWebUIWebSocketConnection* Connection = ConnectionPtr->Get();
+
+			const FUTF8ToTCHAR Converted(reinterpret_cast<const ANSICHAR*>(Data), Size);
+			const FString Payload(Converted.Length(), Converted.Get());
+			TSharedPtr<FJsonObject> Message;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Payload);
+			if (!FJsonSerializer::Deserialize(Reader, Message) || !Message.IsValid())
+			{
+				return;
+			}
+
+			FString MessageType;
+			if (!Message->TryGetStringField(TEXT("type"), MessageType))
+			{
+				return;
+			}
+			if (MessageType.Equals(TEXT("subscribe"), ESearchCase::IgnoreCase))
+			{
+				FString WebUIId;
+				if (!Message->TryGetStringField(TEXT("webUIId"), WebUIId))
+				{
+					return;
+				}
+
+				TArray<FString> ImageKeys;
+				const TArray<TSharedPtr<FJsonValue>>* ImageKeyValues = nullptr;
+				if (Message->TryGetArrayField(TEXT("imageKeys"), ImageKeyValues))
+				{
+					for (const TSharedPtr<FJsonValue>& Value : *ImageKeyValues)
+					{
+						FString ImageKey;
+						if (Value.IsValid() && Value->TryGetString(ImageKey) && !ImageKey.IsEmpty())
+						{
+							ImageKeys.Add(ImageKey);
+						}
+					}
+				}
+
+				Connection->SetSubscription(WebUIId, ImageKeys);
+			}
+			else if (MessageType.Equals(TEXT("unsubscribeAll"), ESearchCase::IgnoreCase))
+			{
+				Connection->ClearSubscription();
+			}
+			else if (MessageType.Equals(TEXT("snapshotRequest"), ESearchCase::IgnoreCase))
+			{
+				Connection->ResetStreamingState();
+			}
 		}
 
 		void OnConnectionClosed(uint16 ConnectionId)
@@ -751,11 +875,44 @@ function clearRenderTargetObjectUrls(){
 function refreshImageSrc(img,url){
  img.src=url;
 }
-function buildImageRegistryKey(webUIId,componentId){
- return `${String(webUIId || '')}::${String(componentId || '')}`;
+function buildImageRegistryKey(webUIId,componentId,slot){
+ return `${String(webUIId || '')}::${String(componentId || '')}::${String(slot || '')}`;
+}
+function collectSubscribedImageKeys(webUIId){
+ const prefix=`${String(webUIId || '')}::`;
+ const keys=[];
+ for(const key of imageElementRegistry.keys()){
+  if(String(key || '').startsWith(prefix)){
+   keys.push(key);
+  }
+ }
+ return keys;
+}
+function sendRenderTargetMessage(message){
+ if(!renderTargetSocket || renderTargetSocket.readyState!==WebSocket.OPEN){
+  return false;
+ }
+ try{
+  renderTargetSocket.send(JSON.stringify(message));
+  return true;
+ }catch(error){
+  console.warn('Failed to send render target control message', error);
+  return false;
+ }
+}
+function syncRenderTargetSubscription(){
+ if(!renderTargetSocket || renderTargetSocket.readyState!==WebSocket.OPEN){
+  return;
+ }
+ if(!currentWebUIId){
+  sendRenderTargetMessage({type:'unsubscribeAll'});
+  return;
+ }
+ sendRenderTargetMessage({type:'subscribe',webUIId:currentWebUIId,imageKeys:collectSubscribedImageKeys(currentWebUIId)});
+ sendRenderTargetMessage({type:'snapshotRequest'});
 }
 function applyRenderTargetFrame(message){
- const key=buildImageRegistryKey(message.webUIId,message.componentId);
+ const key=buildImageRegistryKey(message.webUIId,message.componentId,message.slot);
  const img=imageElementRegistry.get(key);
  window.__webuiRtStats.lastKey=key;
  window.__webuiRtStats.lastBytes=String(message.pngBase64 || '').length;
@@ -818,6 +975,7 @@ function connectRenderTargetSocket(){
    renderTargetSocketConnecting=false;
    renderTargetSocket=socket;
    window.__webuiRtStats.connected=true;
+   syncRenderTargetSubscription();
    console.info('RenderTarget WebSocket connected', socketUrl);
   };
   socket.onmessage=async(event)=>{
@@ -867,9 +1025,11 @@ function renderImageFrame(webUIId,image,variant){
  const img=document.createElement('img');
  img.alt=image.label || image.slot || 'WebUI image';
  const componentId=String(image.componentId || '');
+ const slot=String(image.slot || '');
  frame.dataset.webuiId=String(webUIId || '');
  frame.dataset.componentId=componentId;
- imageElementRegistry.set(buildImageRegistryKey(webUIId,componentId),img);
+ frame.dataset.slot=slot;
+ imageElementRegistry.set(buildImageRegistryKey(webUIId,componentId,slot),img);
  const sourceUrl=String(image.imageUrl || '');
  const isRenderTarget=String(image.sourceKind || '')==='renderTarget';
  if(isRenderTarget && renderTargetSocketPort>0){
@@ -1319,6 +1479,8 @@ async function load(){
   empty.className='empty';
   empty.textContent=isWidgetView ? 'No WidgetOnly or Both WebUIHostComponent was found.' : 'No BrowserOnly or Both WebUIHostComponent was found.';
   panelScrollHost.append(empty);
+  currentWebUIId='';
+  syncRenderTargetSubscription();
   return;
  }
  const panels=document.createElement('div');
@@ -1335,14 +1497,15 @@ async function load(){
    for(const panel of panels.querySelectorAll('[data-webui-panel]')){
     panel.classList.toggle('active',panel.dataset.webuiPanel===webUIId);
    }
-   const activeBody=bodyByWebUIId.get(webUIId);
-   if(activeBody){
-    scrollContainer=activeBody;
-    activeBody.onscroll=()=>setScrollingState(true);
-    requestAnimationFrame(()=>{
-     activeBody.scrollTop=restoreScrollTop;
-    });
-   }
+  const activeBody=bodyByWebUIId.get(webUIId);
+  if(activeBody){
+   scrollContainer=activeBody;
+   activeBody.onscroll=()=>setScrollingState(true);
+   requestAnimationFrame(()=>{
+    activeBody.scrollTop=restoreScrollTop;
+   });
+  }
+  syncRenderTargetSubscription();
   };
  for(const host of hosts){
   const tab=document.createElement('button');
@@ -3004,7 +3167,6 @@ bool UWebUIRuntimeSubsystem::StartWebSocketServer(int32 Port)
 	}
 
 	ActiveWebSocketPort = Port;
-	WebSocketStreamLastSentTimes.Reset();
 	WebSocketTickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UWebUIRuntimeSubsystem::TickWebSocketStreaming));
 	return true;
 }
@@ -3025,14 +3187,13 @@ void UWebUIRuntimeSubsystem::StopWebSocketServer()
 	}
 
 	ActiveWebSocketPort = 0;
-	WebSocketStreamLastSentTimes.Reset();
 }
 
 bool UWebUIRuntimeSubsystem::TickWebSocketStreaming(float DeltaTime)
 {
 	(void)DeltaTime;
 	const double Now = FPlatformTime::Seconds();
-	constexpr double StreamIntervalSeconds = 0.1;
+	constexpr double StreamIntervalSeconds = RenderTargetStreamIntervalSeconds;
 
 	if (!WebSocketServer || !WebSocketServer->IsLaunched() || WebSocketServer->Count() <= 0)
 	{
@@ -3062,9 +3223,9 @@ bool UWebUIRuntimeSubsystem::TickWebSocketStreaming(float DeltaTime)
 				continue;
 			}
 
-			const FString StreamKey = WebUIId + TEXT("::") + ImageComponent->GetName();
-			const double* LastSentTime = WebSocketStreamLastSentTimes.Find(StreamKey);
-			if (LastSentTime && (Now - *LastSentTime) < StreamIntervalSeconds)
+			const FString SlotName = StaticEnum<EWebUIImageSlot>()->GetNameStringByValue(static_cast<int64>(ImageComponent->WebUIImageSlot));
+			const FString StreamKey = BuildRenderTargetStreamKey(WebUIId, ImageComponent->GetName(), SlotName);
+			if (!WebSocketServer->HasReadyConnectionForFrame(WebUIId, StreamKey, Now, StreamIntervalSeconds))
 			{
 				continue;
 			}
@@ -3082,6 +3243,7 @@ bool UWebUIRuntimeSubsystem::TickWebSocketStreaming(float DeltaTime)
 			Message->SetStringField(TEXT("type"), TEXT("renderTargetFrame"));
 			Message->SetStringField(TEXT("webUIId"), WebUIId);
 			Message->SetStringField(TEXT("componentId"), ImageComponent->GetName());
+			Message->SetStringField(TEXT("slot"), SlotName);
 			Message->SetNumberField(TEXT("width"), Width);
 			Message->SetNumberField(TEXT("height"), Height);
 			Message->SetStringField(TEXT("pngBase64"), FBase64::Encode(CompressedBytes.GetData(), CompressedBytes.Num()));
@@ -3093,8 +3255,7 @@ bool UWebUIRuntimeSubsystem::TickWebSocketStreaming(float DeltaTime)
 				continue;
 			}
 
-			WebSocketStreamLastSentTimes.Add(StreamKey, Now);
-			WebSocketServer->Broadcast(JsonString);
+			WebSocketServer->SendToSubscribedConnections(WebUIId, StreamKey, JsonString, Now, StreamIntervalSeconds);
 		}
 	}
 

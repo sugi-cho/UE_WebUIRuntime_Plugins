@@ -87,6 +87,5 @@ private:
 	int32 ActivePort = 0;
 	int32 ActiveWebSocketPort = 0;
 	FTSTicker::FDelegateHandle WebSocketTickHandle;
-	TMap<FString, double> WebSocketStreamLastSentTimes;
 	class FWebUIRenderTargetWebSocketServer* WebSocketServer = nullptr;
 };

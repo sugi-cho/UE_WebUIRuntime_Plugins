@@ -82,6 +82,10 @@
 ### 補足
 
 - `RenderTarget` は WebSocket 配信を使うため、`WebUIRuntime` の `WebSocketPort` が有効である必要があります。
+- WebSocket の購読は接続ごとに管理されます。
+- クライアントはタブ切替時に、現在の `WebUIId` と表示中の画像キーを `subscribe` で送り直します。
+- 再接続直後は `snapshotRequest` を送って、最新フレームを再取得します。
+- 購読していない `WebUIId` の RenderTarget フレームは送られません。
 - NDI 画像を使う場合は、`WebUI_NDI` と `NDIIOPlugin` の両方を有効化してください。
 - NDI 側の受信先は `WebUINDIComponent` の `TargetNDIReceiverComponent` で指定します。
 - 画像が表示されない場合は、`SourceTexture` が正しく設定されているか、`WebUIId` が一致しているかを確認してください。
