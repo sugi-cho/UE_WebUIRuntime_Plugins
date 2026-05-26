@@ -164,9 +164,9 @@ namespace
  .panel-scroll > div{flex:1;min-height:0;display:flex}
  .panel{display:none;flex:1;min-height:0;flex-direction:column;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);background:var(--panel-bg);overflow:hidden}
  body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%) blur(4px)}
- .panel.active{display:flex}
- .panel-header{flex:0 0 auto;padding:16px 16px 0}
- .panel-body{flex:1;min-height:0;overflow:auto;padding:0 16px 16px;scrollbar-width:thin;scrollbar-color:transparent transparent;overscroll-behavior:contain}
+.panel.active{display:flex}
+.panel-header{flex:0 0 auto;padding:16px 16px 0}
+.panel-body{flex:1;min-height:0;overflow:auto;padding:0 16px 16px;scrollbar-width:thin;scrollbar-color:transparent transparent;overscroll-behavior:contain}
  body.scrolling .panel-body{scrollbar-color:rgba(255,255,255,.36) transparent}
  body.theme-light.scrolling .panel-body{scrollbar-color:rgba(16,18,22,.34) transparent}
  .panel-body::-webkit-scrollbar{width:10px;height:10px;background:transparent}
@@ -212,16 +212,19 @@ button.webui-button:disabled{opacity:.72;cursor:default}
 .empty{opacity:.75;padding:16px 0}
 )HTML");
 		Html += TEXT(R"HTML(
-.preview-strip{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 12px}
+.preview-layout{display:flex;gap:12px;align-items:stretch;min-height:0}
+.preview-info{flex:1 1 0;min-width:0}
+.preview-media{flex:1 1 0;min-width:0;display:flex}
+.preview-strip{display:flex;flex-direction:column;gap:12px;margin:0;width:100%}
 .preview-frame,.inline-image-frame,.icon-frame{border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,.22);overflow:hidden}
-.preview-frame{flex:1 1 240px;min-width:220px}
-.preview-frame img,.inline-image-frame img,.icon-frame img{display:block;width:100%;height:100%;object-fit:contain}
-.preview-frame img{max-height:220px;aspect-ratio:16/9}
-.inline-image-list{display:flex;flex-wrap:wrap;gap:10px;margin:10px 0 0}
-.inline-image-frame{flex:0 1 240px;min-width:160px;max-width:320px}
-.inline-image-frame img{max-height:180px;aspect-ratio:4/3}
+.preview-frame{flex:0 0 auto;width:100%;min-width:0;max-width:none}
+.preview-frame img,.inline-image-frame img,.icon-frame img{display:block;width:100%;height:auto;object-fit:contain}
+.preview-frame img{max-height:none}
+.inline-image-list{display:flex;flex-direction:column;gap:10px;margin:10px 0 0;width:100%}
+.inline-image-frame{flex:0 0 auto;min-width:0;max-width:none;width:100%}
+.inline-image-frame img{max-height:none}
 .icon-frame{width:28px;height:28px;flex:0 0 28px}
-.icon-frame img{width:100%;height:100%}
+.icon-frame img{width:100%;height:100%;object-fit:contain}
 .tab-label{display:inline-flex;align-items:center;gap:8px;min-width:0}
 .tab-label-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  body.compact .tabs{margin-top:0}
@@ -815,10 +818,20 @@ async function load(){
    panel.dataset.webuiPanel=host.webUIId;
    const panelHeader=document.createElement('div');
    panelHeader.className='panel-header';
-   panelHeader.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
    const previewImages=(host.images||[]).filter(image=>String(image.slot||'')==='Preview');
    if(previewImages.length){
-    panelHeader.append(renderImageStrip(previewImages,'preview'));
+    const previewLayout=document.createElement('div');
+    previewLayout.className='preview-layout';
+    const previewInfo=document.createElement('div');
+    previewInfo.className='preview-info';
+    previewInfo.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+    const previewMedia=document.createElement('div');
+    previewMedia.className='preview-media';
+    previewMedia.append(renderImageStrip(previewImages,'preview'));
+    previewLayout.append(previewInfo,previewMedia);
+    panelHeader.append(previewLayout);
+   }else{
+    panelHeader.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
    }
    const panelBody=document.createElement('div');
    panelBody.className='panel-body';
@@ -1611,14 +1624,23 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 			{
 				continue;
 			}
+
+			if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
+			{
+				if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(Host->GetWebUIId(), ImageComponent))
+				{
+					HostImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
+				}
+
+				if (ImageComponent->WebUIImageSlot != EWebUIImageSlot::Inline)
+				{
+					continue;
+				}
+			}
+
 			if (TSharedPtr<FJsonObject> ComponentObject = BuildComponentSchema(Component, Host->GetWebUIId()))
 			{
 				ComponentValues.Add(MakeShared<FJsonValueObject>(ComponentObject));
-				const TArray<TSharedPtr<FJsonValue>>& Images = ComponentObject->GetArrayField(TEXT("images"));
-				for (const TSharedPtr<FJsonValue>& ImageValue : Images)
-				{
-					HostImageValues.Add(ImageValue);
-				}
 			}
 		}
 
