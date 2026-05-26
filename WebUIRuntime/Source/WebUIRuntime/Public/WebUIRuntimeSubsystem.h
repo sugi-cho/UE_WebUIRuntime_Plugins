@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "HttpRouteHandle.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "WebUIRuntimeSubsystem.generated.h"
@@ -11,6 +12,7 @@ class IHttpRouter;
 class AActor;
 class UActorComponent;
 class UWebUIHostComponent;
+class UWebUIImageComponent;
 class UTexture;
 struct FHttpServerRequest;
 
@@ -57,8 +59,12 @@ private:
 	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
 	FString BuildImageUrl(const FString& WebUIId, const FString& ComponentId) const;
-	TUniquePtr<struct FHttpServerResponse> MakeImageResponse(UTexture* Texture, FString& OutError) const;
-	bool TryGetTexturePixels(UTexture* Texture, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError) const;
+	TUniquePtr<struct FHttpServerResponse> MakeImageResponse(const UWebUIImageComponent* ImageComponent, FString& OutError) const;
+	bool TryGetTexturePixels(UTexture* Texture, bool bForceOpaqueRenderTargetImage, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError) const;
+	bool EncodeTextureToPNG(UTexture* Texture, bool bForceOpaqueRenderTargetImage, TArray<uint8>& OutCompressedBytes, int32& OutWidth, int32& OutHeight, FString& OutError) const;
+	bool StartWebSocketServer(int32 Port);
+	void StopWebSocketServer();
+	bool TickWebSocketStreaming(float DeltaTime);
 
 	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange = true);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
@@ -70,6 +76,7 @@ private:
 
 	TUniquePtr<struct FHttpServerResponse> MakeJsonResponse(const TSharedRef<FJsonObject>& Object) const;
 	TSharedPtr<FJsonObject> ParseRequestJson(const FHttpServerRequest& Request, FString& OutError) const;
+	void AddNoCacheHeaders(struct FHttpServerResponse& Response) const;
 
 private:
 	UPROPERTY()
@@ -78,4 +85,8 @@ private:
 	TSharedPtr<IHttpRouter> Router;
 	TArray<FHttpRouteHandle> RouteHandles;
 	int32 ActivePort = 0;
+	int32 ActiveWebSocketPort = 0;
+	FTSTicker::FDelegateHandle WebSocketTickHandle;
+	TMap<FString, double> WebSocketStreamLastSentTimes;
+	class FWebUIRenderTargetWebSocketServer* WebSocketServer = nullptr;
 };

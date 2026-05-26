@@ -13,7 +13,9 @@ public class WebUI_NDI : ModuleRules
 				"CoreUObject",
 				"Engine",
 				"WebUIRuntime",
-				"NDIIO"
+				"NDIIO",
+				"RenderCore",
+				"RHI"
 			}
 		);
 	}

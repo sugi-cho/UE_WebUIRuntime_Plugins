@@ -26,4 +26,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image")
 	TObjectPtr<UTexture> SourceTexture;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image", meta=(ToolTip="Force RenderTarget alpha to fully opaque for this image. Disable this to preserve the RenderTarget alpha channel."))
+	bool bForceOpaqueRenderTargetImage = false;
 };

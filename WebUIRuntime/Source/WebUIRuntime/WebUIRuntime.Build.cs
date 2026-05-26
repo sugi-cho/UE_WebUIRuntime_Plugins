@@ -28,6 +28,7 @@ public class WebUIRuntime : ModuleRules
 				"JsonUtilities",
 				"RenderCore",
 				"RHI",
+				"WebSocketNetworking",
 				"Slate",
 				"SlateCore"
 			}
