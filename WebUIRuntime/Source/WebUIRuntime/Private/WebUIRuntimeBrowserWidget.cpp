@@ -1,7 +1,11 @@
 #include "WebUIRuntimeBrowserWidget.h"
 
 #include "Components/Overlay.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/OverlaySlot.h"
 #include "Components/PanelWidget.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Blueprint/WidgetTree.h"
 #include "TimerManager.h"
 #include "WebBrowser.h"
@@ -44,6 +48,33 @@ namespace
 
 		return Encoded;
 	}
+
+	void ConfigureBrowserSlot(UPanelSlot* Slot)
+	{
+		if (UOverlaySlot* OverlaySlot = Cast<UOverlaySlot>(Slot))
+		{
+			OverlaySlot->SetHorizontalAlignment(HAlign_Fill);
+			OverlaySlot->SetVerticalAlignment(VAlign_Fill);
+		}
+		else if (UHorizontalBoxSlot* HorizontalBoxSlot = Cast<UHorizontalBoxSlot>(Slot))
+		{
+			HorizontalBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			HorizontalBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			HorizontalBoxSlot->SetVerticalAlignment(VAlign_Fill);
+		}
+		else if (UVerticalBoxSlot* VerticalBoxSlot = Cast<UVerticalBoxSlot>(Slot))
+		{
+			VerticalBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			VerticalBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			VerticalBoxSlot->SetVerticalAlignment(VAlign_Fill);
+		}
+		else if (UCanvasPanelSlot* CanvasPanelSlot = Cast<UCanvasPanelSlot>(Slot))
+		{
+			CanvasPanelSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+			CanvasPanelSlot->SetOffsets(FMargin(0.0f));
+			CanvasPanelSlot->SetAutoSize(false);
+		}
+	}
 }
 
 void UWebUIRuntimeBrowserWidget::NativeConstruct()
@@ -63,6 +94,16 @@ void UWebUIRuntimeBrowserWidget::NativeDestruct()
 {
 	ClearLoadRetryTimer();
 	Super::NativeDestruct();
+}
+
+void UWebUIRuntimeBrowserWidget::ReleaseSlateResources(bool bReleaseChildren)
+{
+	ClearLoadRetryTimer();
+	Super::ReleaseSlateResources(bReleaseChildren);
+
+	// Drop cached widget references so Slate can be torn down cleanly.
+	WebBrowser = nullptr;
+	NativeRootOverlay = nullptr;
 }
 
 TSharedRef<SWidget> UWebUIRuntimeBrowserWidget::RebuildWidget()
@@ -150,7 +191,7 @@ void UWebUIRuntimeBrowserWidget::EnsureBrowserWidget()
 	if (UPanelWidget* Panel = Cast<UPanelWidget>(Tree->RootWidget))
 	{
 		WebBrowser = Tree->ConstructWidget<UWebBrowser>(UWebBrowser::StaticClass(), TEXT("WebUIRuntimeBrowser"));
-		Panel->AddChild(WebBrowser);
+		ConfigureBrowserSlot(Panel->AddChild(WebBrowser));
 	}
 	else if (!WebBrowser)
 	{

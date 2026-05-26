@@ -2,6 +2,9 @@
 
 #include "Components/SceneComponent.h"
 #include "WebUIHostComponent.h"
+#include "WebUIRuntimeSubsystem.h"
+#include "WebUIRuntimeSettings.h"
+#include "HAL/PlatformProcess.h"
 
 AWebUIHostActor::AWebUIHostActor()
 {
@@ -109,4 +112,44 @@ void AWebUIHostActor::SyncHostComponent() const
 	WebUIHostComponent->Description = Description;
 	WebUIHostComponent->bAutoSaveChangedValues = bAutoSaveChangedValues;
 	WebUIHostComponent->bAutoLoadSavedValues = bAutoLoadSavedValues;
+}
+
+FString AWebUIHostActor::GetBrowserURL() const
+{
+	UWebUIHostComponent* Comp = GetWebUIHostComponent();
+	if (!Comp)
+	{
+		return FString();
+	}
+
+	int32 Port = 0;
+	if (const UWorld* World = Comp->GetWorld())
+	{
+		if (const UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+		{
+			Port = Runtime->GetServerPort();
+		}
+	}
+
+	if (Port <= 0)
+	{
+		Port = GetDefault<UWebUIRuntimeSettings>()->Port;
+	}
+
+	const bool bAllowRemote = GetDefault<UWebUIRuntimeSettings>()->bAllowRemoteAccess;
+	const FString Host = bAllowRemote ? FString(FPlatformProcess::ComputerName()) : TEXT("localhost");
+
+	const FString CurrentWebUIId = Comp->GetWebUIId();
+	return FString::Printf(TEXT("http://%s:%d/webui?webuiId=%s"), *Host, Port, *CurrentWebUIId);
+}
+
+FString AWebUIHostActor::GetEmbeddedURL() const
+{
+	const FString BrowserURL = GetBrowserURL();
+	if (BrowserURL.IsEmpty())
+	{
+		return BrowserURL;
+	}
+
+	return BrowserURL + TEXT("&embed=1");
 }

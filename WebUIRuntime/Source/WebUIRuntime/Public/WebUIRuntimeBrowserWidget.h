@@ -18,6 +18,7 @@ public:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 	virtual void SynchronizeProperties() override;
 
 	UFUNCTION(BlueprintCallable, Category="WebUI Runtime")

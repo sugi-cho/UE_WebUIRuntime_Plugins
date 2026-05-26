@@ -59,27 +59,36 @@ namespace
  --content-gap: 16px;
  --panel-radius: 8px;
 }
-html,body{margin:0;background:transparent;overflow:auto}
-body{font-family:system-ui,sans-serif;color:var(--text)}
-body.theme-light{--page-bg:rgba(248,250,252,0.98);--shell-bg:#f8fafc;--panel-bg:#ffffff;--panel-bg-embed:rgba(255,255,255,0.74);--border:#d8e0ea;--border-strong:#7aa3d8;--button-bg:#e6edf6;--button-bg-pressed:#bfd6ef;--text:#101216;--muted:#4b5563}
-body.theme-dark{--page-bg:rgba(16,18,22,0.98);--shell-bg:#101216;--panel-bg:#171b22;--panel-bg-embed:rgba(23,27,34,0.72);--border:#2d3440;--border-strong:#5b7898;--button-bg:#233247;--button-bg-pressed:#4b6f95;--text:#e9edf2;--muted:#cfd6df}
-body.embed{overflow:hidden}
-body.compact{--page-padding:12px;--content-gap:10px}
-.page-shell{min-height:100vh;box-sizing:border-box;padding:var(--page-padding);background:var(--shell-bg)}
-body.embed .page-shell{min-height:100vh;padding:0;background:transparent}
-.page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:0 0 var(--content-gap)}
-.page-title{margin:0}
-.external-link{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--muted);border:1px solid var(--border);background:rgba(255,255,255,.02);padding:8px 12px;border-radius:999px}
-.external-link:hover{color:var(--text);border-color:var(--border-strong)}
-body.embed .page-header{display:none}
-.tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid var(--border)}
-.tab{border:1px solid var(--border);border-bottom:none;background:var(--button-bg);color:var(--muted);padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
-.tab.active{background:var(--panel-bg);color:var(--text);border-color:var(--border-strong);border-bottom:1px solid var(--panel-bg);z-index:1}
-body.embed .tab.active{border-bottom-color:transparent}
-.tab:not(.active){opacity:.9}
-.panel{display:none;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);padding:16px;margin:0 0 var(--content-gap);background:var(--panel-bg)}
-body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%) blur(4px)}
-.panel.active{display:block}
+ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+ body{height:100%;font-family:system-ui,sans-serif;color:var(--text)}
+ body.theme-light{--page-bg:rgba(248,250,252,0.98);--shell-bg:#f8fafc;--panel-bg:#ffffff;--panel-bg-embed:rgba(255,255,255,0.74);--border:#d8e0ea;--border-strong:#7aa3d8;--button-bg:#e6edf6;--button-bg-pressed:#bfd6ef;--text:#101216;--muted:#4b5563}
+ body.theme-dark{--page-bg:rgba(16,18,22,0.98);--shell-bg:#101216;--panel-bg:#171b22;--panel-bg-embed:rgba(23,27,34,0.72);--border:#2d3440;--border-strong:#5b7898;--button-bg:#233247;--button-bg-pressed:#4b6f95;--text:#e9edf2;--muted:#cfd6df}
+ body.embed{overflow:hidden}
+ body.compact{--page-padding:12px;--content-gap:10px}
+ .page-shell{height:100vh;box-sizing:border-box;padding:var(--page-padding);background:var(--shell-bg);display:flex;flex-direction:column;min-height:0}
+ body.embed .page-shell{height:100vh;padding:0;background:transparent}
+ .page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin:0 0 var(--content-gap)}
+ .page-title{margin:0}
+ .external-link{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--muted);border:1px solid var(--border);background:rgba(255,255,255,.02);padding:8px 12px;border-radius:999px}
+ .external-link:hover{color:var(--text);border-color:var(--border-strong)}
+ body.embed .page-header{display:none}
+ .app-shell{display:flex;flex-direction:column;flex:1;min-height:0}
+ .tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;padding:0 0 0 8px;margin:12px 0 0;border-bottom:1px solid var(--border);flex:0 0 auto}
+ .tab{border:1px solid var(--border);border-bottom:none;background:var(--button-bg);color:var(--muted);padding:10px 16px 11px;border-radius:10px 10px 0 0;cursor:pointer;position:relative;top:1px}
+ .tab.active{background:var(--panel-bg);color:var(--text);border-color:var(--border-strong);border-bottom:1px solid var(--panel-bg);z-index:1}
+ body.embed .tab.active{border-bottom-color:transparent}
+ .tab:not(.active){opacity:.9}
+ .panel-scroll{flex:1;min-height:0;overflow:auto;padding:0 8px 0 0;scrollbar-width:thin;scrollbar-color:transparent transparent;overscroll-behavior:contain}
+ body.scrolling .panel-scroll{scrollbar-color:rgba(255,255,255,.36) transparent}
+ body.theme-light.scrolling .panel-scroll{scrollbar-color:rgba(16,18,22,.34) transparent}
+ .panel-scroll::-webkit-scrollbar{width:10px;height:10px;background:transparent}
+ .panel-scroll::-webkit-scrollbar-track{background:transparent}
+ .panel-scroll::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;background-clip:padding-box;transition:background-color .15s ease}
+ body.scrolling .panel-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.32)}
+ body.theme-light.scrolling .panel-scroll::-webkit-scrollbar-thumb{background:rgba(16,18,22,.28)}
+ .panel{display:none;border:1px solid var(--border);border-top:none;border-radius:0 var(--panel-radius) var(--panel-radius) var(--panel-radius);padding:16px;margin:0 0 var(--content-gap);background:var(--panel-bg)}
+ body.embed .panel{background:var(--panel-bg-embed);backdrop-filter:saturate(120%) blur(4px)}
+ .panel.active{display:block}
 .host-meta{opacity:.78;margin-top:4px;white-space:pre-wrap}
 .component{border-top:1px solid var(--border);padding-top:12px;margin-top:12px}
 .property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0}
@@ -116,8 +125,8 @@ button.webui-button.pressed{background:var(--button-bg-pressed);border-color:#8a
 button.webui-button:disabled{opacity:.72;cursor:default}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
-body.compact .tabs{margin-top:0}
-body.compact .panel{padding:12px}
+ body.compact .tabs{margin-top:0}
+ body.compact .panel{padding:12px}
 body.compact .property-row{margin:8px 0;grid-template-columns:150px minmax(0,1fr)}
 .linear-color-group{grid-template-columns:minmax(0,180px) minmax(0,1fr)}
 .linear-color-group>input[type="color"]{width:44px;min-width:44px;height:39px;padding:4px}
@@ -137,10 +146,15 @@ body.embed .color-picker-group{grid-template-columns:minmax(0,1fr)}
 <h1 class="page-title">__WEBUI_TITLE__</h1>
 <a id="externalLink" class="external-link" href="#" target="_blank" rel="noopener noreferrer">Open external browser</a>
 </header>
-<main id="app"></main>
+<main id="app" class="app-shell">
+<div class="tabs"></div>
+<div class="panel-scroll"></div>
+</main>
 </div>
 <script>
 const app=document.getElementById('app');
+const tabsHost=app.querySelector('.tabs');
+const panelScrollHost=app.querySelector('.panel-scroll');
 const url=new URL(window.location.href);
 const params=url.searchParams;
 const externalLink=document.getElementById('externalLink');
@@ -149,10 +163,22 @@ const initialWebUIId=params.get('webuiId') || '';
 const isEmbed=params.get('embed')==='1';
 const isCompact=params.get('compact')==='1';
 const theme=(params.get('theme')||'dark').toLowerCase();
+let scrollContainer=null;
+let scrollStateTimer=null;
 document.body.classList.toggle('embed',isEmbed);
 document.body.classList.toggle('compact',isCompact);
 document.body.classList.toggle('theme-light',theme==='light');
 document.body.classList.toggle('theme-dark',theme!=='light');
+const setScrollingState=(isScrolling)=>{
+ document.body.classList.toggle('scrolling',isScrolling);
+ if(scrollStateTimer){
+  clearTimeout(scrollStateTimer);
+  scrollStateTimer=null;
+ }
+ if(isScrolling){
+  scrollStateTimer=setTimeout(()=>document.body.classList.remove('scrolling'),160);
+ }
+};
 if(externalLink){
  const externalUrl=new URL(window.location.href);
  externalUrl.searchParams.delete('embed');
@@ -580,30 +606,34 @@ function renderComponent(host,c){
 }
 async function load(){
  const restoreWebUIId=currentWebUIId;
- const restoreScrollY=window.scrollY;
+ const restoreScrollTop=scrollContainer ? scrollContainer.scrollTop : 0;
+ scrollContainer=null;
+ setScrollingState(false);
  const schema=await (await fetch('/api/webui/schema')).json();
- app.innerHTML='';
+ tabsHost.innerHTML='';
+ panelScrollHost.innerHTML='';
  const hosts=[...(schema.hosts||[])].sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
  if(!hosts.length){
   const empty=document.createElement('div');
   empty.className='empty';
   empty.textContent='No WebUIHostComponent was found.';
-  app.append(empty);
+  panelScrollHost.append(empty);
   return;
  }
- const tabs=document.createElement('div');
- tabs.className='tabs';
+  const panelScroll=panelScrollHost;
+  panelScroll.onscroll=()=>setScrollingState(true);
+  scrollContainer=panelScroll;
  const panels=document.createElement('div');
  const requestedWebUIId=currentWebUIId || restoreWebUIId || initialWebUIId;
- const setActive=(webUIId)=>{
-  currentWebUIId=webUIId;
-  for(const tab of tabs.querySelectorAll('[data-webui-id]')){
-   tab.classList.toggle('active',tab.dataset.webuiId===webUIId);
-  }
-  for(const panel of panels.querySelectorAll('[data-webui-panel]')){
-   panel.classList.toggle('active',panel.dataset.webuiPanel===webUIId);
-  }
- };
+  const setActive=(webUIId)=>{
+   currentWebUIId=webUIId;
+   for(const tab of tabsHost.querySelectorAll('[data-webui-id]')){
+    tab.classList.toggle('active',tab.dataset.webuiId===webUIId);
+   }
+   for(const panel of panels.querySelectorAll('[data-webui-panel]')){
+    panel.classList.toggle('active',panel.dataset.webuiPanel===webUIId);
+   }
+  };
  for(const host of hosts){
   const tab=document.createElement('button');
   tab.className='tab';
@@ -611,7 +641,7 @@ async function load(){
   tab.dataset.webuiId=host.webUIId;
   tab.textContent=host.webUIId;
   tab.onclick=()=>setActive(host.webUIId);
-  tabs.append(tab);
+   tabsHost.append(tab);
 
   const panel=document.createElement('section');
   panel.className='panel';
@@ -635,13 +665,15 @@ async function load(){
   for(const c of host.components||[]){
    panel.append(renderComponent(host,c));
   }
-  panels.append(panel);
+   panels.append(panel);
+  }
+  panelScroll.append(panels);
+  setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
+  requestAnimationFrame(()=>{
+   panelScroll.scrollTop=restoreScrollTop;
+  });
  }
- app.append(tabs,panels);
- setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
- requestAnimationFrame(()=>window.scrollTo(0,restoreScrollY));
-}
-load();
+ load();
 </script>
 </body>
 </html>

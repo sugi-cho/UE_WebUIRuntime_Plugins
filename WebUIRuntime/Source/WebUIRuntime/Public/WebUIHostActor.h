@@ -48,6 +48,12 @@ public:
 	void ClearWebUIButtons();
 
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	FString GetBrowserURL() const;
+
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	FString GetEmbeddedURL() const;
+
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	const TArray<FName>& GetWebUIButtons() const;
 
 	void NotifyWebUIButtonClicked(FName ButtonId);
