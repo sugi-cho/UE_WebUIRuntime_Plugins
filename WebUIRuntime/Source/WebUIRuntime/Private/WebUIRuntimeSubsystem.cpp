@@ -675,7 +675,6 @@ async function load(){
    if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
     const actorSection=document.createElement('section');
     actorSection.className='component';
-    actorSection.innerHTML='<h3>Actor</h3>';
     if((host.actorProperties||[]).length){
     actorSection.append(renderProperties(host,'actor','',host.actorProperties));
    }
