@@ -12,6 +12,7 @@ public class WebUI_NDI : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"MediaAssets",
 				"WebUIRuntime",
 				"NDIIO",
 				"RenderCore",

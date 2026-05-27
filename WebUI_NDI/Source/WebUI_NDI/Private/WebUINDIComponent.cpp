@@ -1,6 +1,6 @@
 #include "WebUINDIComponent.h"
 
-#include "Objects/Libraries/NDIIOLibrary.h"
+#include "Services/NDIFinderService.h"
 #include "Objects/Media/NDIMediaReceiver.h"
 
 UWebUINDIComponent::UWebUINDIComponent()
@@ -19,7 +19,7 @@ void UWebUINDIComponent::RefreshNDISources()
 {
 	AvailableNDISources.Reset();
 
-	const TArray<FNDIConnectionInformation> Sources = UNDIIOLibrary::K2_GetNDISourceCollection();
+	const TArray<FNDIConnectionInformation> Sources = FNDIFinderService::GetNetworkSourceCollection();
 	AvailableNDISources.Reserve(Sources.Num());
 	for (const FNDIConnectionInformation& Source : Sources)
 	{
@@ -64,7 +64,7 @@ bool UWebUINDIComponent::ApplySelectedNDISource()
 
 	FNDIConnectionInformation ConnectionInformation;
 	bool bFoundSource = false;
-	const TArray<FNDIConnectionInformation> Sources = UNDIIOLibrary::K2_GetNDISourceCollection();
+	const TArray<FNDIConnectionInformation> Sources = FNDIFinderService::GetNetworkSourceCollection();
 	for (const FNDIConnectionInformation& Source : Sources)
 	{
 		if (Source.SourceName.Equals(SelectedNDISource, ESearchCase::IgnoreCase) ||
