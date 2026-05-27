@@ -4,7 +4,7 @@
 #include "WebUIComponentBase.h"
 #include "WebUINDIComponent.generated.h"
 
-class UNDIReceiverComponent;
+class UNDIMediaReceiver;
 struct FNDIConnectionInformation;
 
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
@@ -35,7 +35,7 @@ public:
 	bool ApplySelectedNDISource();
 
 	UFUNCTION(BlueprintCallable, Category="WebUI|NDI")
-	void SetTargetNDIReceiverComponent(UNDIReceiverComponent* InTargetNDIReceiverComponent);
+	void SetTargetNDIMediaReceiver(UNDIMediaReceiver* InTargetNDIMediaReceiver);
 
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI|NDI", DisplayName="OnWebUINDISourceSelected")
 	void K2_OnWebUINDISourceSelected(const FString& SourceName);
@@ -44,7 +44,7 @@ public:
 	FString SelectedNDISource;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")
-	TObjectPtr<UNDIReceiverComponent> TargetNDIReceiverComponent = nullptr;
+	TObjectPtr<UNDIMediaReceiver> TargetNDIMediaReceiver = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")
 	bool bAutoRefreshSources = false;

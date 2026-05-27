@@ -1,7 +1,7 @@
 #include "WebUINDIComponent.h"
 
 #include "Objects/Libraries/NDIIOLibrary.h"
-#include "Components/NDIReceiverComponent.h"
+#include "Objects/Media/NDIMediaReceiver.h"
 
 UWebUINDIComponent::UWebUINDIComponent()
 {
@@ -57,7 +57,7 @@ void UWebUINDIComponent::SelectNDISource(const FString& SourceName)
 
 bool UWebUINDIComponent::ApplySelectedNDISource()
 {
-	if (SelectedNDISource.IsEmpty() || !IsValid(TargetNDIReceiverComponent))
+	if (SelectedNDISource.IsEmpty() || !IsValid(TargetNDIMediaReceiver))
 	{
 		return false;
 	}
@@ -81,22 +81,24 @@ bool UWebUINDIComponent::ApplySelectedNDISource()
 		return false;
 	}
 
-	const FNDIConnectionInformation CurrentConnection = TargetNDIReceiverComponent->GetCurrentConnectionInformation();
+	TargetNDIMediaReceiver->ConnectionSetting = ConnectionInformation;
+
+	const FNDIConnectionInformation CurrentConnection = TargetNDIMediaReceiver->GetCurrentConnectionInformation();
 	if (CurrentConnection.IsValid())
 	{
-		TargetNDIReceiverComponent->ChangeConnection(ConnectionInformation);
+		TargetNDIMediaReceiver->ChangeConnection(ConnectionInformation);
 	}
 	else
 	{
-		TargetNDIReceiverComponent->StartReceiver(ConnectionInformation);
+		TargetNDIMediaReceiver->Initialize(ConnectionInformation, UNDIMediaReceiver::EUsage::Standalone);
 	}
 
 	return true;
 }
 
-void UWebUINDIComponent::SetTargetNDIReceiverComponent(UNDIReceiverComponent* InTargetNDIReceiverComponent)
+void UWebUINDIComponent::SetTargetNDIMediaReceiver(UNDIMediaReceiver* InTargetNDIMediaReceiver)
 {
-	TargetNDIReceiverComponent = InTargetNDIReceiverComponent;
+	TargetNDIMediaReceiver = InTargetNDIMediaReceiver;
 	ApplySelectedNDISource();
 }
 
