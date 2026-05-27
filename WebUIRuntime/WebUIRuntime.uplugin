@@ -6,7 +6,7 @@
 	"Description": "Runtime Web UI controls for Actor and Component properties.",
 	"Category": "Web UI",
 	"CreatedBy": "sugi-cho",
-	"EnabledByDefault": false,
+	"EnabledByDefault": true,
 	"CanContainContent": true,
 	"Plugins": [
 		{
