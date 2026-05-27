@@ -87,7 +87,10 @@
 - 再接続直後は `snapshotRequest` を送って、最新フレームを再取得します。
 - 購読していない `WebUIId` の RenderTarget フレームは送られません。
 - NDI 画像を使う場合は、`WebUI_NDI` と `NDIIOPlugin` の両方を有効化してください。
-- NDI 側の受信先は `WebUINDIComponent` の `TargetNDIReceiverComponent` で指定します。
+- NDI 側の受信先は `WebUINDIComponent` の `TargetNDIMediaReceiver` で指定します。
+- `WebUINDIComponent` の `SelectedNDISource` に表示したい Source 名を入れると、`UNDIMediaReceiver` の `ConnectionSetting` に反映されます。
+- 初回接続時は `Initialize(ConnectionInfo, Standalone)`、既存接続がある場合は `ChangeConnection(ConnectionInfo)` を呼びます。
+- `SetTargetNDIMediaReceiver(UNDIMediaReceiver)` を使うと、Blueprint から受信先を差し替えられます。
 - 画像が表示されない場合は、`SourceTexture` が正しく設定されているか、`WebUIId` が一致しているかを確認してください。
 
 ## Property を WebUI に出す方法
@@ -233,6 +236,7 @@ URL 例:
 - 公式 SDK はこちらです: [NDI Unreal Engine SDK](https://ndi.video/for-developers/ndi-unreal-engine-sdk/)
 - このリポジトリでは UE 5.7 向けの `NDIIOPlugin` を想定しています。
 - `WebUI_NDI` を有効にすると、`NDIMediaTexture2D` を `WebUIImageComponent` で表示できます。
+- `WebUINDIComponent` では `NDIMediaReceiver` を直接持たせて NDI Source を切り替えます。`NDIReceiverComponent` は不要です。
 - 5.7 以外の Unreal Engine では、そのままでは動作しない可能性があります。
 
 ## 注意事項

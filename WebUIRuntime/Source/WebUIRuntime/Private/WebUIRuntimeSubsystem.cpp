@@ -802,7 +802,8 @@ body.embed .color-picker-group{grid-template-columns:minmax(0,1fr)}
  .preview-info,.preview-media{flex:0 0 calc(50% - 4px)}
  .preview-strip{gap:8px}
  .preview-frame,.inline-image-frame{min-height:96px}
- .vector-group,.rotator-group,.color-group,.linear-color-group,.color-picker-group{grid-template-columns:1fr;gap:6px}
+ .vector-group,.rotator-group{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+ .color-group,.linear-color-group,.color-picker-group{grid-template-columns:1fr;gap:6px}
  .linear-color-group>input[type="color"],.color-picker-group input[type="color"]{width:100%;min-width:0}
  .color-picker-group .hex-field{width:100%}
  .tab-label-text,.property-name,.host-meta{word-break:break-word}
