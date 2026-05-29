@@ -123,6 +123,11 @@ namespace
 			return !SubscribedWebUIId.IsEmpty() && SubscribedWebUIId == WebUIId && SubscribedImageKeys.Contains(ImageKey);
 		}
 
+		bool IsSubscribedToWebUI(const FString& WebUIId) const
+		{
+			return !SubscribedWebUIId.IsEmpty() && SubscribedWebUIId == WebUIId;
+		}
+
 		bool CanSendFrame(const FString& WebUIId, const FString& ImageKey, double Now, double StreamIntervalSeconds) const
 		{
 			if (!WantsFrame(WebUIId, ImageKey))
@@ -355,6 +360,30 @@ class FWebUIRenderTargetWebSocketServer : public FTickableGameObject
 		{
 			UE_LOG(LogWebUIRuntime, Log, TEXT("WebSocket client closed: %u"), ConnectionId);
 			Connections.Remove(ConnectionId);
+		}
+
+	public:
+		void SendSchemaChanged(const FString& WebUIId)
+		{
+			TSharedRef<FJsonObject> Message = MakeShared<FJsonObject>();
+			Message->SetStringField(TEXT("type"), TEXT("schemaChanged"));
+			Message->SetStringField(TEXT("webUIId"), WebUIId);
+
+			FString JsonString;
+			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&JsonString);
+			if (!FJsonSerializer::Serialize(Message, Writer))
+			{
+				return;
+			}
+
+			for (const TPair<uint16, TUniquePtr<FWebUIWebSocketConnection>>& Pair : Connections)
+			{
+				const TUniquePtr<FWebUIWebSocketConnection>& Connection = Pair.Value;
+				if (Connection.IsValid() && Connection->IsSubscribedToWebUI(WebUIId))
+				{
+					Connection->Send(JsonString);
+				}
+			}
 		}
 
 	private:
@@ -1038,6 +1067,10 @@ function connectRenderTargetSocket(){
     const message=JSON.parse(payloadText);
     if(String(message.type || '')==='renderTargetFrame'){
      applyRenderTargetFrame(message);
+    }else if(String(message.type || '')==='schemaChanged'){
+     if(!message.webUIId || String(message.webUIId)===String(currentWebUIId || '')){
+      await load();
+     }
     }
    }catch(error){
     console.warn('Failed to handle WebSocket frame', error);
@@ -2344,6 +2377,45 @@ bool UWebUIRuntimeSubsystem::HandleImage(const FHttpServerRequest& Request, cons
 	AddNoCacheHeaders(*Response);
 	OnComplete(MoveTemp(Response));
 	return true;
+}
+
+void UWebUIRuntimeSubsystem::NotifyWebUIComponentStateChanged(UActorComponent* Component)
+{
+	if (!IsValid(Component))
+	{
+		return;
+	}
+
+	AActor* Owner = Component->GetOwner();
+	if (!IsValid(Owner))
+	{
+		return;
+	}
+
+	UWebUIHostComponent* Host = nullptr;
+	TArray<UActorComponent*> Components;
+	Owner->GetComponents(Components);
+	for (UActorComponent* OwnerComponent : Components)
+	{
+		Host = Cast<UWebUIHostComponent>(OwnerComponent);
+		if (IsValid(Host))
+		{
+			break;
+		}
+	}
+
+	if (!IsValid(Host))
+	{
+		return;
+	}
+
+	const FString WebUIId = Host->GetWebUIId();
+	if (WebUIId.IsEmpty() || !WebSocketServer)
+	{
+		return;
+	}
+
+	WebSocketServer->SendSchemaChanged(WebUIId);
 }
 
 bool UWebUIRuntimeSubsystem::HandleProperty(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)

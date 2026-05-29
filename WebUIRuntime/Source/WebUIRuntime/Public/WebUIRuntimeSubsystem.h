@@ -27,6 +27,7 @@ public:
 
 	void RegisterHost(UWebUIHostComponent* Host);
 	void UnregisterHost(UWebUIHostComponent* Host);
+	void NotifyWebUIComponentStateChanged(UActorComponent* Component);
 
 	UFUNCTION(BlueprintCallable, Category="WebUI")
 	bool StartServerFromSettings();
