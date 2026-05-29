@@ -5,6 +5,67 @@
 #include "WebUIRuntimeSubsystem.h"
 #include "WebUIRuntimeSettings.h"
 
+namespace
+{
+	FString StripWebUIOrderPrefix(const FString& RawLabel)
+	{
+		int32 SeparatorIndex = INDEX_NONE;
+		for (int32 Index = 0; Index < RawLabel.Len(); ++Index)
+		{
+			const TCHAR Char = RawLabel[Index];
+			if (Char == TEXT('_') || Char == TEXT(' '))
+			{
+				SeparatorIndex = Index;
+				break;
+			}
+			if (!FChar::IsDigit(Char))
+			{
+				return RawLabel;
+			}
+		}
+
+		if (SeparatorIndex > 0 && SeparatorIndex < RawLabel.Len())
+		{
+			const FString Prefix = RawLabel.Left(SeparatorIndex);
+			int64 ParsedOrder = 0;
+			if (LexTryParseString(ParsedOrder, *Prefix) && ParsedOrder >= 0)
+			{
+				const FString DisplayLabel = RawLabel.Mid(SeparatorIndex + 1);
+				if (!DisplayLabel.IsEmpty())
+				{
+					return DisplayLabel;
+				}
+			}
+		}
+
+		return RawLabel;
+	}
+
+	FName ResolveWebUIButtonId(const TArray<FName>& Buttons, const FName RequestedButtonId)
+	{
+		if (RequestedButtonId.IsNone())
+		{
+			return NAME_None;
+		}
+
+		if (Buttons.Contains(RequestedButtonId))
+		{
+			return RequestedButtonId;
+		}
+
+		const FString RequestedLabel = StripWebUIOrderPrefix(RequestedButtonId.ToString());
+		for (const FName& Button : Buttons)
+		{
+			if (StripWebUIOrderPrefix(Button.ToString()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
+			{
+				return Button;
+			}
+		}
+
+		return NAME_None;
+	}
+}
+
 UWebUIHostComponent::UWebUIHostComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
@@ -132,6 +193,12 @@ void UWebUIHostComponent::RegisterWebUIButton(FName ButtonId)
 
 void UWebUIHostComponent::UnregisterWebUIButton(FName ButtonId)
 {
+	ButtonId = ResolveWebUIButtonId(WebUIButtons, ButtonId);
+	if (ButtonId.IsNone())
+	{
+		return;
+	}
+
 	WebUIButtons.Remove(ButtonId);
 	WebUIButtonEnabledStates.Remove(ButtonId);
 }
@@ -144,15 +211,30 @@ void UWebUIHostComponent::ClearWebUIButtons()
 
 void UWebUIHostComponent::SetWebUIButtonEnabled(FName ButtonId, bool bEnabled)
 {
+	ButtonId = ResolveWebUIButtonId(WebUIButtons, ButtonId);
 	if (!ButtonId.IsNone())
 	{
+		const bool* CurrentEnabled = WebUIButtonEnabledStates.Find(ButtonId);
+		if (CurrentEnabled && *CurrentEnabled == bEnabled)
+		{
+			return;
+		}
 		WebUIButtonEnabledStates.Add(ButtonId, bEnabled);
+
+		if (UWorld* World = GetWorld())
+		{
+			if (UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+			{
+				Runtime->NotifyWebUIComponentStateChanged(this);
+			}
+		}
 	}
 }
 
 bool UWebUIHostComponent::IsWebUIButtonEnabled(FName ButtonId) const
 {
-	if (ButtonId.IsNone() || !WebUIButtons.Contains(ButtonId))
+	ButtonId = ResolveWebUIButtonId(WebUIButtons, ButtonId);
+	if (ButtonId.IsNone())
 	{
 		return false;
 	}

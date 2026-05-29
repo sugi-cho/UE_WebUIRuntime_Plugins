@@ -87,6 +87,7 @@ private:
 	TArray<FHttpRouteHandle> RouteHandles;
 	int32 ActivePort = 0;
 	int32 ActiveWebSocketPort = 0;
+	int32 SchemaRevision = 0;
 	FTSTicker::FDelegateHandle WebSocketTickHandle;
 	class FWebUIRenderTargetWebSocketServer* WebSocketServer = nullptr;
 };

@@ -929,6 +929,9 @@ function isHostVisibleForCurrentSurface(host){
  let renderTargetSocketConnecting=false;
  let renderTargetSocketPort=0;
  let renderTargetSocketRetryTimer=null;
+ let schemaPollTimer=null;
+ let schemaReloadInFlight=false;
+ let lastSchemaRevision=0;
  window.__webuiRtStats={connected:false,frames:0,lastKey:'',lastBytes:0,lastError:''};
 function clearImageRefreshTimers(){
  for(const timer of imageRefreshTimers){
@@ -944,6 +947,35 @@ function clearRenderTargetObjectUrls(){
   URL.revokeObjectURL(url);
  }
  renderTargetObjectUrls=new Map();
+}
+function stopSchemaPolling(){
+ if(schemaPollTimer){
+  clearInterval(schemaPollTimer);
+  schemaPollTimer=null;
+ }
+}
+async function refreshSchemaIfNeeded(){
+ if(schemaReloadInFlight){
+  return;
+ }
+ schemaReloadInFlight=true;
+ try{
+  const schema=await (await fetch('/api/webui/schema')).json();
+  const nextRevision=Number(schema.schemaRevision || 0);
+  if(nextRevision!==lastSchemaRevision){
+   await load();
+  }
+ }catch(error){
+  console.warn('Failed to refresh WebUI schema', error);
+ }finally{
+  schemaReloadInFlight=false;
+ }
+}
+function startSchemaPolling(){
+ if(schemaPollTimer){
+  return;
+ }
+ schemaPollTimer=setInterval(refreshSchemaIfNeeded,1000);
 }
 function refreshImageSrc(img,url){
  img.src=url;
@@ -1546,7 +1578,8 @@ async function load(){
  clearImageElementRegistry();
  clearRenderTargetObjectUrls();
  const schema=await (await fetch('/api/webui/schema')).json();
- const nextRenderTargetSocketPort=Number(schema.webSocketPort || 0);
+ lastSchemaRevision=Number(schema.schemaRevision || 0);
+  const nextRenderTargetSocketPort=Number(schema.webSocketPort || 0);
  if(renderTargetSocket && renderTargetSocketPort!==nextRenderTargetSocketPort){
   try{ renderTargetSocket.close(); }catch(_error){}
   renderTargetSocket=null;
@@ -1658,8 +1691,9 @@ async function load(){
    panel.append(panelHeader,panelBody);
    panels.append(panel);
   }
-  panelScrollHost.append(panels);
-  connectRenderTargetSocket();
+ panelScrollHost.append(panels);
+ connectRenderTargetSocket();
+ startSchemaPolling();
   setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
  }
  load();
@@ -1712,6 +1746,41 @@ async function load(){
 		}
 
 		return false;
+	}
+
+	FString StripWebUIOrderPrefix(const FString& RawLabel)
+	{
+		int32 Order = TNumericLimits<int32>::Max();
+		FString DisplayLabel;
+		if (TryParseWebUIOrderPrefix(RawLabel, Order, DisplayLabel) && !DisplayLabel.IsEmpty())
+		{
+			return DisplayLabel;
+		}
+		return RawLabel;
+	}
+
+	FName ResolveWebUIButtonId(const TArray<FName>& Buttons, const FName RequestedButtonId)
+	{
+		if (RequestedButtonId.IsNone())
+		{
+			return NAME_None;
+		}
+
+		if (Buttons.Contains(RequestedButtonId))
+		{
+			return RequestedButtonId;
+		}
+
+		const FString RequestedLabel = StripWebUIOrderPrefix(RequestedButtonId.ToString());
+		for (const FName& Button : Buttons)
+		{
+			if (StripWebUIOrderPrefix(Button.ToString()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
+			{
+				return Button;
+			}
+		}
+
+		return NAME_None;
 	}
 
 	void SortWebUIJsonObjectsByField(TArray<TSharedPtr<FJsonValue>>& Values, const TCHAR* FieldName)
@@ -1953,6 +2022,25 @@ async function load(){
 		}
 
 		UFunction* Function = Owner->FindFunction(ButtonId);
+		if (!IsWebUIButtonFunction(Function))
+		{
+			const FString RequestedLabel = StripWebUIOrderPrefix(ButtonId.ToString());
+			for (TFieldIterator<UFunction> It(Owner->GetClass()); It; ++It)
+			{
+				UFunction* Candidate = *It;
+				if (!IsWebUIButtonFunction(Candidate))
+				{
+					continue;
+				}
+
+				if (StripWebUIOrderPrefix(Candidate->GetName()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
+				{
+					Function = Candidate;
+					break;
+				}
+			}
+		}
+
 		if (IsWebUIButtonFunction(Function))
 		{
 			Owner->ProcessEvent(Function, nullptr);
@@ -1964,7 +2052,7 @@ async function load(){
 		{
 			for (UEdGraph* Graph : Blueprint->FunctionGraphs)
 			{
-				if (!Graph || Graph->GetFName() != ButtonId)
+				if (!Graph)
 				{
 					continue;
 				}
@@ -1972,10 +2060,16 @@ async function load(){
 				FKismetUserDeclaredFunctionMetadata* MetaData = FBlueprintEditorUtils::GetGraphFunctionMetaData(Graph);
 				if (MetaData && IsWebUIButtonCategory(MetaData->Category.ToString()))
 				{
-					Owner->ProcessEvent(Function, nullptr);
-					return true;
+					if (Graph->GetFName() == ButtonId || StripWebUIOrderPrefix(Graph->GetName()).Equals(StripWebUIOrderPrefix(ButtonId.ToString()), ESearchCase::IgnoreCase))
+					{
+						UFunction* GraphFunction = Owner->FindFunction(Graph->GetFName());
+						if (IsWebUIButtonFunction(GraphFunction))
+						{
+							Owner->ProcessEvent(GraphFunction, nullptr);
+							return true;
+						}
+					}
 				}
-				break;
 			}
 		}
 #endif
@@ -2412,9 +2506,11 @@ void UWebUIRuntimeSubsystem::NotifyWebUIComponentStateChanged(UActorComponent* C
 	const FString WebUIId = Host->GetWebUIId();
 	if (WebUIId.IsEmpty() || !WebSocketServer)
 	{
+		++SchemaRevision;
 		return;
 	}
 
+	++SchemaRevision;
 	WebSocketServer->SendSchemaChanged(WebUIId);
 }
 
@@ -2506,17 +2602,18 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 
 	if (OwnerType.Equals(TEXT("host"), ESearchCase::IgnoreCase))
 	{
-		if (!Host || !Host->GetWebUIButtons().Contains(ButtonId))
+		const FName ResolvedButtonId = Host ? ResolveWebUIButtonId(Host->GetWebUIButtons(), ButtonId) : NAME_None;
+		if (!Host || ResolvedButtonId.IsNone())
 		{
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 			return true;
 		}
-		if (!Host->IsWebUIButtonEnabled(ButtonId))
+		if (!Host->IsWebUIButtonEnabled(ResolvedButtonId))
 		{
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
 			return true;
 		}
-		Host->NotifyWebUIButtonClicked(ButtonId);
+		Host->NotifyWebUIButtonClicked(ResolvedButtonId);
 	}
 	else if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
 	{
@@ -2531,12 +2628,13 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 
 		if (AWebUIHostActor* HostActor = Cast<AWebUIHostActor>(Owner))
 		{
-			if (!HostActor->GetWebUIButtons().Contains(ButtonId))
+			const FName ResolvedButtonId = ResolveWebUIButtonId(HostActor->GetWebUIButtons(), ButtonId);
+			if (ResolvedButtonId.IsNone())
 			{
 				OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 				return true;
 			}
-			HostActor->NotifyWebUIButtonClicked(ButtonId);
+			HostActor->NotifyWebUIButtonClicked(ResolvedButtonId);
 		}
 		else
 		{
@@ -2556,17 +2654,18 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 		}
 
 		UWebUIComponentBase* Component = Cast<UWebUIComponentBase>(Owner);
-		if (!Component || !Component->GetWebUIButtons().Contains(ButtonId))
+		const FName ResolvedButtonId = Component ? ResolveWebUIButtonId(Component->GetWebUIButtons(), ButtonId) : NAME_None;
+		if (!Component || ResolvedButtonId.IsNone())
 		{
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 			return true;
 		}
-		if (!Component->IsWebUIButtonEnabled(ButtonId))
+		if (!Component->IsWebUIButtonEnabled(ResolvedButtonId))
 		{
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
 			return true;
 		}
-		Component->NotifyWebUIButtonClicked(ButtonId);
+		Component->NotifyWebUIButtonClicked(ResolvedButtonId);
 	}
 
 	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
@@ -2580,6 +2679,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 	TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
 	Root->SetNumberField(TEXT("webSocketPort"), ActiveWebSocketPort);
 	Root->SetBoolField(TEXT("renderTargetStreamingEnabled"), ActiveWebSocketPort > 0);
+	Root->SetNumberField(TEXT("schemaRevision"), SchemaRevision);
 	TArray<TSharedPtr<FJsonValue>> HostValues;
 
 	for (UWebUIHostComponent* Host : Hosts)
