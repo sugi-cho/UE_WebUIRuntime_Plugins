@@ -133,11 +133,36 @@ void UWebUIHostComponent::RegisterWebUIButton(FName ButtonId)
 void UWebUIHostComponent::UnregisterWebUIButton(FName ButtonId)
 {
 	WebUIButtons.Remove(ButtonId);
+	WebUIButtonEnabledStates.Remove(ButtonId);
 }
 
 void UWebUIHostComponent::ClearWebUIButtons()
 {
 	WebUIButtons.Reset();
+	WebUIButtonEnabledStates.Reset();
+}
+
+void UWebUIHostComponent::SetWebUIButtonEnabled(FName ButtonId, bool bEnabled)
+{
+	if (!ButtonId.IsNone())
+	{
+		WebUIButtonEnabledStates.Add(ButtonId, bEnabled);
+	}
+}
+
+bool UWebUIHostComponent::IsWebUIButtonEnabled(FName ButtonId) const
+{
+	if (ButtonId.IsNone() || !WebUIButtons.Contains(ButtonId))
+	{
+		return false;
+	}
+
+	if (const bool* bEnabled = WebUIButtonEnabledStates.Find(ButtonId))
+	{
+		return *bEnabled;
+	}
+
+	return true;
 }
 
 const TArray<FName>& UWebUIHostComponent::GetWebUIButtons() const

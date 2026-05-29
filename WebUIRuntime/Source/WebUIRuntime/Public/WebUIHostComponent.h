@@ -62,6 +62,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	void ClearWebUIButtons();
 
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	void SetWebUIButtonEnabled(FName ButtonId, bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	bool IsWebUIButtonEnabled(FName ButtonId) const;
+
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	const TArray<FName>& GetWebUIButtons() const;
 
@@ -127,4 +133,7 @@ private:
 
 	UPROPERTY(EditAnywhere, Category="WebUI Host")
 	TArray<FName> WebUIButtons;
+
+	UPROPERTY(EditAnywhere, Category="WebUI Host")
+	TMap<FName, bool> WebUIButtonEnabledStates;
 };

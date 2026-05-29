@@ -21,6 +21,12 @@ class WEBUIRUNTIME_API UWebUIImageComponent : public UWebUIComponentBase
 public:
 	UWebUIImageComponent();
 
+	UFUNCTION(BlueprintCallable, Category="WebUI Image")
+	void SetWebUIImageEnabled(bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category="WebUI Image")
+	bool IsWebUIImageEnabled() const;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image")
 	EWebUIImageSlot WebUIImageSlot = EWebUIImageSlot::Preview;
 
@@ -29,4 +35,7 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Image", meta=(ToolTip="Force RenderTarget alpha to fully opaque for this image. Disable this to preserve the RenderTarget alpha channel."))
 	bool bForceOpaqueRenderTargetImage = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Internal")
+	bool bWebUIImageEnabled = true;
 };

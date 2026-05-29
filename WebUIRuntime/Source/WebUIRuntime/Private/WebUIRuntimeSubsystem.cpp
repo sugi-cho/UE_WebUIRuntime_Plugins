@@ -435,6 +435,7 @@ namespace
 		ImageObject->SetStringField(TEXT("slot"), StaticEnum<EWebUIImageSlot>()->GetNameStringByValue(static_cast<int64>(ImageComponent->WebUIImageSlot)));
 		ImageObject->SetStringField(TEXT("label"), ImageComponent->GetName());
 		ImageObject->SetStringField(TEXT("sourceKind"), ImageComponent->SourceTexture->IsA<UTextureRenderTarget2D>() ? TEXT("renderTarget") : TEXT("texture2d"));
+		ImageObject->SetBoolField(TEXT("enabled"), ImageComponent->IsWebUIImageEnabled());
 		FString ImageUrl = TEXT("/api/webui/image");
 		AppendQueryParameter(ImageUrl, TEXT("webuiId"), WebUIId);
 		AppendQueryParameter(ImageUrl, TEXT("componentId"), ImageComponent->GetName());
@@ -1067,6 +1068,9 @@ function renderImageFrame(webUIId,image,variant){
  frame.className=variant==='preview' ? 'preview-frame' : variant==='inline' ? 'inline-image-frame' : 'icon-frame';
  const img=document.createElement('img');
  img.alt=image.label || image.slot || 'WebUI image';
+ if(image.enabled===false){
+  frame.style.display='none';
+ }
  const componentId=String(image.componentId || '');
  const slot=String(image.slot || '');
  frame.dataset.webuiId=String(webUIId || '');
@@ -1075,14 +1079,16 @@ function renderImageFrame(webUIId,image,variant){
  imageElementRegistry.set(buildImageRegistryKey(webUIId,componentId,slot),img);
  const sourceUrl=String(image.imageUrl || '');
  const isRenderTarget=String(image.sourceKind || '')==='renderTarget';
- if(isRenderTarget && renderTargetSocketPort>0){
-  img.src='data:image/gif;base64,R0lGODlhAQABAAAAACw=';
- }else{
-  img.src=sourceUrl;
+ if(image.enabled!==false){
+  if(isRenderTarget && renderTargetSocketPort>0){
+   img.src='data:image/gif;base64,R0lGODlhAQABAAAAACw=';
+  }else{
+   img.src=sourceUrl;
+  }
  }
  frame.append(img);
  const refreshMs=Number(image.refreshMs || 0);
- if(refreshMs > 0 && sourceUrl){
+ if(image.enabled!==false && refreshMs > 0 && sourceUrl){
   const timer=setInterval(()=>{
    refreshImageSrc(img,`${sourceUrl}${sourceUrl.includes('?') ? '&' : '?'}_ts=${Date.now()}`);
   }, refreshMs);
@@ -1466,7 +1472,11 @@ function renderButtonRow(host,ownerType,componentId,buttons){
   const btn=document.createElement('button');
   btn.className='webui-button';
   btn.textContent=b.label || b.id;
+  btn.disabled=b.enabled===false;
   btn.onclick=async()=>{
+   if(btn.disabled){
+    return;
+   }
    btn.classList.add('pressed');
    btn.disabled=true;
    try{
@@ -1516,7 +1526,7 @@ async function load(){
  renderTargetSocketPort=nextRenderTargetSocketPort;
  tabsHost.innerHTML='';
  panelScrollHost.innerHTML='';
- const hosts=[...(schema.hosts||[])].filter(isHostVisibleForCurrentSurface).sort((a,b)=>String(a.webUIId).localeCompare(String(b.webUIId)));
+ const hosts=[...(schema.hosts||[])].filter(isHostVisibleForCurrentSurface);
  if(!hosts.length){
   const empty=document.createElement('div');
   empty.className='empty';
@@ -1562,11 +1572,11 @@ async function load(){
    const iconWrap=renderImageFrame(host.webUIId,iconImages[0],'icon');
    const text=document.createElement('span');
    text.className='tab-label-text';
-   text.textContent=host.webUIId;
+   text.textContent=host.displayName || host.webUIId;
    label.append(iconWrap,text);
    tab.append(label);
   }else{
-   tab.textContent=host.webUIId;
+   tab.textContent=host.displayName || host.webUIId;
   }
   tab.onclick=()=>setActive(host.webUIId);
    tabsHost.append(tab);
@@ -1582,14 +1592,14 @@ async function load(){
     previewLayout.className='preview-layout';
     const previewInfo=document.createElement('div');
     previewInfo.className='preview-info';
-    previewInfo.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+    previewInfo.innerHTML=`<h2>${host.displayName || host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
     const previewMedia=document.createElement('div');
     previewMedia.className='preview-media';
     previewMedia.append(renderImageStrip(host.webUIId,previewImages,'preview'));
     previewLayout.append(previewInfo,previewMedia);
     panelHeader.append(previewLayout);
    }else{
-    panelHeader.innerHTML=`<h2>${host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+    panelHeader.innerHTML=`<h2>${host.displayName || host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
    }
    const panelBody=document.createElement('div');
    panelBody.className='panel-body';
@@ -1633,6 +1643,97 @@ async function load(){
 		Object->SetBoolField(TEXT("ok"), false);
 		Object->SetStringField(TEXT("error"), Error);
 		return Object;
+	}
+
+	bool TryParseWebUIOrderPrefix(const FString& RawLabel, int32& OutOrder, FString& OutDisplayLabel)
+	{
+		OutOrder = TNumericLimits<int32>::Max();
+		OutDisplayLabel = RawLabel;
+
+		int32 UnderscoreIndex = INDEX_NONE;
+		int32 SeparatorIndex = INDEX_NONE;
+		for (int32 Index = 0; Index < RawLabel.Len(); ++Index)
+		{
+			const TCHAR Char = RawLabel[Index];
+			if (Char == TEXT('_') || Char == TEXT(' '))
+			{
+				SeparatorIndex = Index;
+				break;
+			}
+			if (!FChar::IsDigit(Char))
+			{
+				return false;
+			}
+		}
+
+		if (SeparatorIndex > 0 && SeparatorIndex < RawLabel.Len())
+		{
+			const FString OrderString = RawLabel.Left(SeparatorIndex);
+			int64 ParsedOrder = 0;
+			if (LexTryParseString(ParsedOrder, *OrderString) && ParsedOrder >= 0 && ParsedOrder <= TNumericLimits<int32>::Max())
+			{
+				OutOrder = static_cast<int32>(ParsedOrder);
+				OutDisplayLabel = RawLabel.Mid(SeparatorIndex + 1);
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	void SortWebUIJsonObjectsByField(TArray<TSharedPtr<FJsonValue>>& Values, const TCHAR* FieldName)
+	{
+		struct FOrderedValue
+		{
+			int32 Order = TNumericLimits<int32>::Max();
+			int32 OriginalIndex = 0;
+			TSharedPtr<FJsonValue> Value;
+		};
+
+		TArray<FOrderedValue> OrderedValues;
+		OrderedValues.Reserve(Values.Num());
+
+		for (int32 Index = 0; Index < Values.Num(); ++Index)
+		{
+			FOrderedValue Entry;
+			Entry.OriginalIndex = Index;
+			Entry.Value = Values[Index];
+
+			if (Entry.Value.IsValid())
+			{
+				const TSharedPtr<FJsonObject> Object = Entry.Value->AsObject();
+				if (Object.IsValid())
+				{
+					FString RawLabel;
+					if (Object->TryGetStringField(FieldName, RawLabel))
+					{
+						FString DisplayLabel;
+						TryParseWebUIOrderPrefix(RawLabel, Entry.Order, DisplayLabel);
+						if (DisplayLabel != RawLabel)
+						{
+							Object->SetStringField(FieldName, DisplayLabel);
+						}
+					}
+				}
+			}
+
+			OrderedValues.Add(MoveTemp(Entry));
+		}
+
+		OrderedValues.Sort([](const FOrderedValue& A, const FOrderedValue& B)
+		{
+			if (A.Order != B.Order)
+			{
+				return A.Order < B.Order;
+			}
+			return A.OriginalIndex < B.OriginalIndex;
+		});
+
+		Values.Reset();
+		for (FOrderedValue& Entry : OrderedValues)
+		{
+			Values.Add(Entry.Value);
+		}
 	}
 
 	bool IsWebUICategory(const FString& Category)
@@ -1684,12 +1785,13 @@ async function load(){
 		if (Delta.IsSet()) PropertyObject->SetNumberField(TEXT("step"), Delta.GetValue());
 	}
 
-	TSharedRef<FJsonObject> MakeButtonObject(const FString& Id, const FString& Label, const FString& Kind)
+	TSharedRef<FJsonObject> MakeButtonObject(const FString& Id, const FString& Label, const FString& Kind, bool bEnabled = true)
 	{
 		TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
 		ButtonObject->SetStringField(TEXT("id"), Id);
 		ButtonObject->SetStringField(TEXT("label"), Label);
 		ButtonObject->SetStringField(TEXT("kind"), Kind);
+		ButtonObject->SetBoolField(TEXT("enabled"), bEnabled);
 		return ButtonObject;
 	}
 
@@ -1729,6 +1831,26 @@ async function load(){
 		};
 
 		return !IgnoredButtonFunctions.Contains(Function->GetFName());
+	}
+
+	FString GetWebUIHostDisplayName(const UWebUIHostComponent* Host)
+	{
+		if (!IsValid(Host))
+		{
+			return FString();
+		}
+
+		return Host->GetWebUIId();
+	}
+
+	FString GetWebUIComponentDisplayName(const UActorComponent* Component)
+	{
+		if (const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
+		{
+			return WebUIComponent->GetWebUIDisplayName();
+		}
+
+		return IsValid(Component) ? Component->GetName() : FString();
 	}
 
 	void AddButtonIfMissing(TSet<FName>& SeenButtons, TArray<TSharedPtr<FJsonValue>>& ButtonValues, const FName ButtonId, const FString& Label, const FString& Kind)
@@ -2317,6 +2439,11 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 			return true;
 		}
+		if (!Host->IsWebUIButtonEnabled(ButtonId))
+		{
+			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
+			return true;
+		}
 		Host->NotifyWebUIButtonClicked(ButtonId);
 	}
 	else if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
@@ -2362,6 +2489,11 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button not found"))));
 			return true;
 		}
+		if (!Component->IsWebUIButtonEnabled(ButtonId))
+		{
+			OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
+			return true;
+		}
 		Component->NotifyWebUIButtonClicked(ButtonId);
 	}
 
@@ -2388,14 +2520,16 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		TSharedRef<FJsonObject> HostObject = MakeShared<FJsonObject>();
 		const bool bUseWebSocketStreaming = ActiveWebSocketPort > 0;
 		HostObject->SetStringField(TEXT("webUIId"), Host->GetWebUIId());
+		HostObject->SetStringField(TEXT("displayName"), Host->GetWebUIId());
 		HostObject->SetStringField(TEXT("actorName"), Host->GetOwner()->GetName());
 		HostObject->SetStringField(TEXT("description"), Host->GetDescription());
 		HostObject->SetStringField(TEXT("displayTarget"), GetWebUIHostVisibilityString(Host->DisplayTarget));
 		TArray<TSharedPtr<FJsonValue>> HostButtonValues;
 		for (const FName Button : Host->GetWebUIButtons())
 		{
-			HostButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"))));
+			HostButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"), Host->IsWebUIButtonEnabled(Button))));
 		}
+		SortWebUIJsonObjectsByField(HostButtonValues, TEXT("label"));
 		HostObject->SetArrayField(TEXT("hostButtons"), HostButtonValues);
 		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner())))
 		{
@@ -2433,10 +2567,14 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 			}
 		}
 
+		SortWebUIJsonObjectsByField(HostImageValues, TEXT("label"));
+		SortWebUIJsonObjectsByField(ComponentValues, TEXT("name"));
 		HostObject->SetArrayField(TEXT("components"), ComponentValues);
 		HostObject->SetArrayField(TEXT("images"), HostImageValues);
 		HostValues.Add(MakeShared<FJsonValueObject>(HostObject));
 	}
+
+	SortWebUIJsonObjectsByField(HostValues, TEXT("displayName"));
 
 	Root->SetArrayField(TEXT("hosts"), HostValues);
 	return Root;
@@ -2480,6 +2618,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
 	AppendWebUIButtonFunctions(Actor, ButtonValues);
+	SortWebUIJsonObjectsByField(ButtonValues, TEXT("label"));
 
 	TSharedRef<FJsonObject> ActorObject = MakeShared<FJsonObject>();
 	ActorObject->SetArrayField(TEXT("properties"), PropertyValues);
@@ -2525,13 +2664,15 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
 	AppendWebUIButtonFunctions(Component, ButtonValues);
-	if (const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component))
+	const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component);
+	if (WebUIComponent)
 	{
 		for (const FName Button : WebUIComponent->GetWebUIButtons())
 		{
-			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"))));
+			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"), WebUIComponent->IsWebUIButtonEnabled(Button))));
 		}
 	}
+	SortWebUIJsonObjectsByField(ButtonValues, TEXT("label"));
 
 	TArray<TSharedPtr<FJsonValue>> ImageValues;
 	if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
@@ -2549,7 +2690,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 
 	TSharedRef<FJsonObject> ComponentObject = MakeShared<FJsonObject>();
 	ComponentObject->SetStringField(TEXT("componentId"), Component->GetName());
-	ComponentObject->SetStringField(TEXT("name"), Component->GetName());
+	ComponentObject->SetStringField(TEXT("name"), GetWebUIComponentDisplayName(Component));
 	ComponentObject->SetStringField(TEXT("className"), Component->GetClass()->GetName());
 	ComponentObject->SetArrayField(TEXT("properties"), PropertyValues);
 	ComponentObject->SetArrayField(TEXT("buttons"), ButtonValues);

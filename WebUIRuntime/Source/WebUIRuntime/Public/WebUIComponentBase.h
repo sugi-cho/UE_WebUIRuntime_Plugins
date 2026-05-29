@@ -23,6 +23,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category="WebUI")
 	void ClearWebUIButtons();
 
+	UFUNCTION(BlueprintCallable, Category="WebUI")
+	void SetWebUIButtonEnabled(FName ButtonId, bool bEnabled);
+
+	UFUNCTION(BlueprintPure, Category="WebUI")
+	bool IsWebUIButtonEnabled(FName ButtonId) const;
+
+	UFUNCTION(BlueprintPure, Category="WebUI")
+	FString GetWebUIDisplayName() const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI")
+	void SetWebUIDisplayName(const FString& InDisplayName);
+
 	const TArray<FName>& GetWebUIButtons() const;
 
 	void NotifyWebUIPropertyChanged(FName PropertyName);
@@ -65,6 +77,12 @@ protected:
 	FOnWebUIButtonClicked OnWebUIButtonClicked;
 
 private:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Internal", meta=(AllowPrivateAccess="true"))
+	FString WebUIDisplayName;
+
 	UPROPERTY(EditAnywhere, Category="WebUI")
 	TArray<FName> WebUIButtons;
+
+	UPROPERTY(EditAnywhere, Category="WebUI")
+	TMap<FName, bool> WebUIButtonEnabledStates;
 };
