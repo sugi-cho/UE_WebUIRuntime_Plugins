@@ -308,37 +308,37 @@ const TArray<FName>& UWebUIHostComponent::GetWebUIButtons() const
 
 void UWebUIHostComponent::NotifyWebUIPropertyChanged(FName PropertyName)
 {
-	OnWebUIPropertyChanged.Broadcast(PropertyName);
+	OnWebUIPropertyChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())));
 }
 
 void UWebUIHostComponent::NotifyWebUIBoolChanged(FName PropertyName, bool Value)
 {
-	OnWebUIBoolChanged.Broadcast(PropertyName, Value);
+	OnWebUIBoolChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIFloatChanged(FName PropertyName, double Value)
 {
-	OnWebUIFloatChanged.Broadcast(PropertyName, Value);
+	OnWebUIFloatChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIStringChanged(FName PropertyName, const FString& Value)
 {
-	OnWebUIStringChanged.Broadcast(PropertyName, Value);
+	OnWebUIStringChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIVectorChanged(FName PropertyName, FVector Value)
 {
-	OnWebUIVectorChanged.Broadcast(PropertyName, Value);
+	OnWebUIVectorChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIRotatorChanged(FName PropertyName, FRotator Value)
 {
-	OnWebUIRotatorChanged.Broadcast(PropertyName, Value);
+	OnWebUIRotatorChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value)
 {
-	OnWebUIColorChanged.Broadcast(PropertyName, Value);
+	OnWebUIColorChanged.Broadcast(FName(*StripWebUIOrderPrefix(PropertyName.ToString())), Value);
 }
 
 void UWebUIHostComponent::NotifyWebUIButtonClicked(FName ButtonId)

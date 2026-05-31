@@ -917,7 +917,7 @@ function createRow(p){
  row.className='property-row';
  const name=document.createElement('div');
  name.className='property-name';
- name.textContent=p.name;
+ name.textContent=p.label || p.name;
  const control=document.createElement('div');
  control.className='property-control';
  row.append(name,control);
@@ -1566,7 +1566,9 @@ function renderButtonRow(host,ownerType,componentId,buttons){
 function renderComponent(host,c){
  const cs=document.createElement('section');
  cs.className='component';
- cs.innerHTML=`<h3>${c.name}</h3>`;
+ if(c.showTitle!==false){
+  cs.innerHTML=`<h3>${c.displayName || c.name}</h3>`;
+ }
  cs.append(renderProperties(host,'component',c.componentId,c.properties));
  const inlineImages=(c.images||[]).filter(image=>String(image.slot||'')==='Inline');
  if(inlineImages.length){
@@ -2786,11 +2788,11 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 				continue;
 			}
 
-			if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
+		if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
+		{
+			if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(Host->GetWebUIId(), ImageComponent, bUseWebSocketStreaming))
 			{
-				if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(Host->GetWebUIId(), ImageComponent, bUseWebSocketStreaming))
-				{
-					HostImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
+				HostImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
 				}
 
 				if (ImageComponent->WebUIImageSlot != EWebUIImageSlot::Inline)
@@ -2806,7 +2808,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		}
 
 		SortWebUIJsonObjectsByField(HostImageValues, TEXT("label"));
-		SortWebUIJsonObjectsByField(ComponentValues, TEXT("name"));
+		SortWebUIJsonObjectsByField(ComponentValues, TEXT("displayName"));
 		HostObject->SetArrayField(TEXT("components"), ComponentValues);
 		HostObject->SetArrayField(TEXT("images"), HostImageValues);
 		HostValues.Add(MakeShared<FJsonValueObject>(HostObject));
@@ -2836,6 +2838,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor, 
 
 		TSharedRef<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
 		PropertyObject->SetStringField(TEXT("name"), Property->GetName());
+		PropertyObject->SetStringField(TEXT("label"), Property->GetName());
 		PropertyObject->SetStringField(TEXT("type"), GetPropertyWebUIType(Property));
 		PropertyObject->SetField(TEXT("value"), PropertyToJsonValue(Property, Actor));
 		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("float") || PropertyObject->GetStringField(TEXT("type")) == TEXT("int32"))
@@ -2853,6 +2856,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor, 
 		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
+	SortWebUIJsonObjectsByField(PropertyValues, TEXT("label"));
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
 	AppendWebUIButtonFunctions(
@@ -2888,6 +2892,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 
 		TSharedRef<FJsonObject> PropertyObject = MakeShared<FJsonObject>();
 		PropertyObject->SetStringField(TEXT("name"), Property->GetName());
+		PropertyObject->SetStringField(TEXT("label"), Property->GetName());
 		PropertyObject->SetStringField(TEXT("type"), GetPropertyWebUIType(Property));
 		PropertyObject->SetField(TEXT("value"), PropertyToJsonValue(Property, Component));
 		if (PropertyObject->GetStringField(TEXT("type")) == TEXT("float") || PropertyObject->GetStringField(TEXT("type")) == TEXT("int32"))
@@ -2905,6 +2910,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		}
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
+	SortWebUIJsonObjectsByField(PropertyValues, TEXT("label"));
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
 	UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component);
@@ -2919,7 +2925,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	{
 		for (const FName Button : WebUIComponentBase->GetWebUIButtons())
 		{
-			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"), WebUIComponentBase->IsWebUIButtonEnabled(Button))));
+			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), StripWebUIOrderPrefix(Button.ToString()), TEXT("registered"), WebUIComponentBase->IsWebUIButtonEnabled(Button))));
 		}
 	}
 	SortWebUIJsonObjectsByField(ButtonValues, TEXT("label"));
@@ -2940,8 +2946,11 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 
 	TSharedRef<FJsonObject> ComponentObject = MakeShared<FJsonObject>();
 	ComponentObject->SetStringField(TEXT("componentId"), Component->GetName());
-	ComponentObject->SetStringField(TEXT("name"), GetWebUIComponentDisplayName(Component));
+	const FString ComponentDisplayName = GetWebUIComponentDisplayName(Component);
+	ComponentObject->SetStringField(TEXT("name"), ComponentDisplayName);
+	ComponentObject->SetStringField(TEXT("displayName"), ComponentDisplayName);
 	ComponentObject->SetStringField(TEXT("className"), Component->GetClass()->GetName());
+	ComponentObject->SetBoolField(TEXT("showTitle"), !Cast<UWebUIImageComponent>(Component) || CastChecked<UWebUIImageComponent>(Component)->IsWebUIImageEnabled());
 	ComponentObject->SetArrayField(TEXT("properties"), PropertyValues);
 	ComponentObject->SetArrayField(TEXT("buttons"), ButtonValues);
 	ComponentObject->SetArrayField(TEXT("images"), ImageValues);
