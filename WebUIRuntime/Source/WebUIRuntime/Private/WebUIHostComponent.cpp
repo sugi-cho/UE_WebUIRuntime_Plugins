@@ -41,6 +41,18 @@ namespace
 		return RawLabel;
 	}
 
+	bool IsWebUIButtonFunction(const UFunction* Function)
+	{
+		if (!Function || Function->NumParms != 0 || !Function->HasMetaData(TEXT("Category")))
+		{
+			return false;
+		}
+
+		FString Normalized = Function->GetMetaData(TEXT("Category"));
+		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
+		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
+	}
+
 	FName ResolveWebUIButtonId(const TArray<FName>& Buttons, const FName RequestedButtonId)
 	{
 		if (RequestedButtonId.IsNone())
@@ -59,6 +71,37 @@ namespace
 			if (StripWebUIOrderPrefix(Button.ToString()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
 			{
 				return Button;
+			}
+		}
+
+		return NAME_None;
+	}
+
+	FName ResolveWebUIButtonFunctionId(const UObject* Owner, const FName RequestedButtonId)
+	{
+		if (!IsValid(Owner) || RequestedButtonId.IsNone())
+		{
+			return NAME_None;
+		}
+
+		UFunction* Function = Owner->FindFunction(RequestedButtonId);
+		if (IsWebUIButtonFunction(Function))
+		{
+			return Function->GetFName();
+		}
+
+		const FString RequestedLabel = StripWebUIOrderPrefix(RequestedButtonId.ToString());
+		for (TFieldIterator<UFunction> It(Owner->GetClass()); It; ++It)
+		{
+			UFunction* Candidate = *It;
+			if (!IsWebUIButtonFunction(Candidate))
+			{
+				continue;
+			}
+
+			if (StripWebUIOrderPrefix(Candidate->GetName()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
+			{
+				return Candidate->GetFName();
 			}
 		}
 
@@ -211,7 +254,13 @@ void UWebUIHostComponent::ClearWebUIButtons()
 
 void UWebUIHostComponent::SetWebUIButtonEnabled(FName ButtonId, bool bEnabled)
 {
-	ButtonId = ResolveWebUIButtonId(WebUIButtons, ButtonId);
+	const FName RequestedButtonId = ButtonId;
+	ButtonId = ResolveWebUIButtonId(WebUIButtons, RequestedButtonId);
+	if (ButtonId.IsNone())
+	{
+		ButtonId = ResolveWebUIButtonFunctionId(GetOwner(), RequestedButtonId);
+	}
+
 	if (!ButtonId.IsNone())
 	{
 		const bool* CurrentEnabled = WebUIButtonEnabledStates.Find(ButtonId);
@@ -233,7 +282,12 @@ void UWebUIHostComponent::SetWebUIButtonEnabled(FName ButtonId, bool bEnabled)
 
 bool UWebUIHostComponent::IsWebUIButtonEnabled(FName ButtonId) const
 {
-	ButtonId = ResolveWebUIButtonId(WebUIButtons, ButtonId);
+	const FName RequestedButtonId = ButtonId;
+	ButtonId = ResolveWebUIButtonId(WebUIButtons, RequestedButtonId);
+	if (ButtonId.IsNone())
+	{
+		ButtonId = ResolveWebUIButtonFunctionId(GetOwner(), RequestedButtonId);
+	}
 	if (ButtonId.IsNone())
 	{
 		return false;

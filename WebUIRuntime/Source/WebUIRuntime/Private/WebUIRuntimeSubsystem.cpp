@@ -1935,6 +1935,37 @@ async function load(){
 		return !IgnoredButtonFunctions.Contains(Function->GetFName());
 	}
 
+	FName ResolveWebUIButtonFunctionId(const UObject* Owner, const FName RequestedButtonId)
+	{
+		if (!IsValid(Owner) || RequestedButtonId.IsNone())
+		{
+			return NAME_None;
+		}
+
+		UFunction* Function = Owner->FindFunction(RequestedButtonId);
+		if (IsWebUIButtonFunction(Function))
+		{
+			return Function->GetFName();
+		}
+
+		const FString RequestedLabel = StripWebUIOrderPrefix(RequestedButtonId.ToString());
+		for (TFieldIterator<UFunction> It(Owner->GetClass()); It; ++It)
+		{
+			UFunction* Candidate = *It;
+			if (!IsWebUIButtonFunction(Candidate))
+			{
+				continue;
+			}
+
+			if (StripWebUIOrderPrefix(Candidate->GetName()).Equals(RequestedLabel, ESearchCase::IgnoreCase))
+			{
+				return Candidate->GetFName();
+			}
+		}
+
+		return NAME_None;
+	}
+
 	FString GetWebUIHostDisplayName(const UWebUIHostComponent* Host)
 	{
 		if (!IsValid(Host))
@@ -1955,7 +1986,7 @@ async function load(){
 		return IsValid(Component) ? Component->GetName() : FString();
 	}
 
-	void AddButtonIfMissing(TSet<FName>& SeenButtons, TArray<TSharedPtr<FJsonValue>>& ButtonValues, const FName ButtonId, const FString& Label, const FString& Kind)
+	void AddButtonIfMissing(TSet<FName>& SeenButtons, TArray<TSharedPtr<FJsonValue>>& ButtonValues, const FName ButtonId, const FString& Label, const FString& Kind, const bool bEnabled = true)
 	{
 		if (ButtonId.IsNone() || SeenButtons.Contains(ButtonId))
 		{
@@ -1963,10 +1994,10 @@ async function load(){
 		}
 
 		SeenButtons.Add(ButtonId);
-		ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ButtonId.ToString(), Label, Kind)));
+		ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ButtonId.ToString(), Label, Kind, bEnabled)));
 	}
 
-	void AppendWebUIButtonFunctions(UObject* Owner, TArray<TSharedPtr<FJsonValue>>& ButtonValues)
+	void AppendWebUIButtonFunctions(UObject* Owner, TArray<TSharedPtr<FJsonValue>>& ButtonValues, const TFunctionRef<bool(const FName)>& IsButtonEnabled)
 	{
 		if (!IsValid(Owner))
 		{
@@ -1988,7 +2019,8 @@ async function load(){
 				ButtonValues,
 				Function->GetFName(),
 				Label.IsEmpty() ? Function->GetName() : Label,
-				TEXT("function"));
+				TEXT("function"),
+				IsButtonEnabled(Function->GetFName()));
 		}
 
 #if WITH_EDITOR
@@ -2007,7 +2039,7 @@ async function load(){
 					continue;
 				}
 
-				AddButtonIfMissing(SeenButtons, ButtonValues, Graph->GetFName(), Graph->GetName(), TEXT("blueprintFunction"));
+				AddButtonIfMissing(SeenButtons, ButtonValues, Graph->GetFName(), Graph->GetName(), TEXT("blueprintFunction"), IsButtonEnabled(Graph->GetFName()));
 			}
 		}
 #endif
@@ -2617,12 +2649,25 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 	}
 	else if (OwnerType.Equals(TEXT("actor"), ESearchCase::IgnoreCase))
 	{
-		FString FunctionError;
-		if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+		const FName ResolvedFunctionButtonId = ResolveWebUIButtonFunctionId(Owner, ButtonId);
+		if (!ResolvedFunctionButtonId.IsNone())
 		{
-			TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
-			Response->SetBoolField(TEXT("ok"), true);
-			OnComplete(MakeJsonResponse(Response));
+			if (Host && !Host->IsWebUIButtonEnabled(ResolvedFunctionButtonId))
+			{
+				OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
+				return true;
+			}
+
+			FString FunctionError;
+			if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+			{
+				TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetBoolField(TEXT("ok"), true);
+				OnComplete(MakeJsonResponse(Response));
+				return true;
+			}
+
+			OnComplete(MakeJsonResponse(MakeErrorObject(FunctionError.IsEmpty() ? TEXT("Button not found") : FunctionError)));
 			return true;
 		}
 
@@ -2644,12 +2689,26 @@ bool UWebUIRuntimeSubsystem::HandleButton(const FHttpServerRequest& Request, con
 	}
 	else
 	{
-		FString FunctionError;
-		if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+		const FName ResolvedFunctionButtonId = ResolveWebUIButtonFunctionId(Owner, ButtonId);
+		if (!ResolvedFunctionButtonId.IsNone())
 		{
-			TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
-			Response->SetBoolField(TEXT("ok"), true);
-			OnComplete(MakeJsonResponse(Response));
+			UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner);
+			if (WebUIComponent && !WebUIComponent->IsWebUIButtonEnabled(ResolvedFunctionButtonId))
+			{
+				OnComplete(MakeJsonResponse(MakeErrorObject(TEXT("Button disabled"))));
+				return true;
+			}
+
+			FString FunctionError;
+			if (InvokeWebUIButtonFunction(Owner, ButtonId, FunctionError))
+			{
+				TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+				Response->SetBoolField(TEXT("ok"), true);
+				OnComplete(MakeJsonResponse(Response));
+				return true;
+			}
+
+			OnComplete(MakeJsonResponse(MakeErrorObject(FunctionError.IsEmpty() ? TEXT("Button not found") : FunctionError)));
 			return true;
 		}
 
@@ -2703,7 +2762,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		}
 		SortWebUIJsonObjectsByField(HostButtonValues, TEXT("label"));
 		HostObject->SetArrayField(TEXT("hostButtons"), HostButtonValues);
-		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner())))
+		if (TSharedPtr<FJsonObject> ActorObject = BuildActorSchema(Cast<AActor>(Host->GetOwner()), Host))
 		{
 			HostObject->SetArrayField(TEXT("actorProperties"), ActorObject->GetArrayField(TEXT("properties")));
 			HostObject->SetArrayField(TEXT("actorButtons"), ActorObject->GetArrayField(TEXT("buttons")));
@@ -2752,7 +2811,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 	return Root;
 }
 
-TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) const
+TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor, UWebUIHostComponent* Host) const
 {
 	if (!IsValid(Actor))
 	{
@@ -2789,7 +2848,13 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor) 
 	}
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
-	AppendWebUIButtonFunctions(Actor, ButtonValues);
+	AppendWebUIButtonFunctions(
+		Actor,
+		ButtonValues,
+		[Host](const FName ButtonId)
+		{
+			return Host ? Host->IsWebUIButtonEnabled(ButtonId) : true;
+		});
 	SortWebUIJsonObjectsByField(ButtonValues, TEXT("label"));
 
 	TSharedRef<FJsonObject> ActorObject = MakeShared<FJsonObject>();
@@ -2835,13 +2900,19 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	}
 
 	TArray<TSharedPtr<FJsonValue>> ButtonValues;
-	AppendWebUIButtonFunctions(Component, ButtonValues);
-	const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component);
-	if (WebUIComponent)
-	{
-		for (const FName Button : WebUIComponent->GetWebUIButtons())
+	UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Component);
+	AppendWebUIButtonFunctions(
+		Component,
+		ButtonValues,
+		[WebUIComponent](const FName ButtonId)
 		{
-			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"), WebUIComponent->IsWebUIButtonEnabled(Button))));
+			return WebUIComponent ? WebUIComponent->IsWebUIButtonEnabled(ButtonId) : true;
+		});
+	if (const UWebUIComponentBase* WebUIComponentBase = Cast<UWebUIComponentBase>(Component))
+	{
+		for (const FName Button : WebUIComponentBase->GetWebUIButtons())
+		{
+			ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(Button.ToString(), Button.ToString(), TEXT("registered"), WebUIComponentBase->IsWebUIButtonEnabled(Button))));
 		}
 	}
 	SortWebUIJsonObjectsByField(ButtonValues, TEXT("label"));

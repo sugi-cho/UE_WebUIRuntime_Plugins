@@ -55,7 +55,7 @@ private:
 	bool HandleAction(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 
 	TSharedRef<FJsonObject> BuildSchema() const;
-	TSharedPtr<FJsonObject> BuildActorSchema(AActor* Actor) const;
+	TSharedPtr<FJsonObject> BuildActorSchema(AActor* Actor, UWebUIHostComponent* Host) const;
 	TSharedPtr<FJsonObject> BuildComponentSchema(UActorComponent* Component, const FString& WebUIId) const;
 	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
