@@ -772,15 +772,11 @@ button{cursor:pointer;background:var(--button-bg)}
 		Html += TEXT(R"HTML(
 .button-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 button{cursor:pointer;background:var(--button-bg)}
-button.webui-button{min-width:120px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;font-weight:600;letter-spacing:.01em;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease, filter .12s ease}
+button.webui-button{min-width:120px;display:flex;align-items:center;justify-content:flex-start;gap:10px;padding:10px 12px;font-weight:600;letter-spacing:.01em;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease, filter .12s ease}
 button.webui-button .webui-button__label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-button.webui-button .webui-button__state{display:none;flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:inherit}
-body.theme-light button.webui-button .webui-button__state{border-color:rgba(16,18,22,.16);background:rgba(16,18,22,.05)}
 button.webui-button.pressed{background:var(--button-bg-pressed);border-color:#8ab1dc;transform:translateY(1px)}
-button.webui-button:disabled{opacity:1;cursor:not-allowed;filter:saturate(.72) grayscale(.15);background:linear-gradient(135deg,rgba(255,255,255,.05),rgba(255,255,255,.02)),var(--button-bg);border-style:dashed;border-color:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
-body.theme-light button.webui-button:disabled{background:linear-gradient(135deg,rgba(0,0,0,.03),rgba(0,0,0,.015)),#eef2f7;border-color:#b8c5d6;box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)}
-button.webui-button:disabled .webui-button__label{opacity:.72;text-decoration:line-through}
-button.webui-button:disabled .webui-button__state{display:inline-flex}
+button.webui-button:disabled{opacity:1;cursor:not-allowed;background:#2b2f36;border-color:#3c424d;color:#c3c8cf;filter:none;box-shadow:none}
+body.theme-light button.webui-button:disabled{background:#b9bec6;border-color:#a8adb6;color:#eef1f5;box-shadow:none}
 )HTML");
 		Html += TEXT(R"HTML(
 .preview-layout{display:flex;gap:12px;align-items:stretch;min-height:0;width:100%;min-width:0}
@@ -1546,13 +1542,7 @@ function renderButtonRow(host,ownerType,componentId,buttons){
  for(const b of buttons||[]){
   const btn=document.createElement('button');
   btn.className='webui-button';
-  const label=document.createElement('span');
-  label.className='webui-button__label';
-  label.textContent=b.label || b.id;
-  const state=document.createElement('span');
-  state.className='webui-button__state';
-  state.textContent='DISABLED';
-  btn.append(label,state);
+  btn.textContent=b.label || b.id;
   btn.disabled=b.enabled===false;
   btn.title=b.enabled===false ? 'Button is disabled' : (b.label || b.id);
   btn.onclick=async()=>{
