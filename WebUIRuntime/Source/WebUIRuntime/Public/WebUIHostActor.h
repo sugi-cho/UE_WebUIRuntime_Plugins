@@ -8,6 +8,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIHostActorButtonClicked, FNam
 
 class UWebUIHostComponent;
 class USceneComponent;
+class UTexture2D;
 
 UCLASS(BlueprintType, Blueprintable)
 class WEBUIRUNTIME_API AWebUIHostActor : public AActor
@@ -52,6 +53,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	FString GetEmbeddedURL() const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateURLQRCodeTexture(const FString& URL, int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateBrowserURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateEmbeddedURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
 
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	const TArray<FName>& GetWebUIButtons() const;

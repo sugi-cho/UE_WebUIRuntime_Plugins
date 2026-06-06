@@ -103,3 +103,18 @@ FString AWebUIHostActor::GetEmbeddedURL() const
 {
 	return WebUIHostComponent ? WebUIHostComponent->GetEmbeddedURL() : FString();
 }
+
+UTexture2D* AWebUIHostActor::CreateURLQRCodeTexture(const FString& URL, const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return WebUIHostComponent ? WebUIHostComponent->CreateURLQRCodeTexture(URL, PixelsPerModule, QuietZoneModules) : nullptr;
+}
+
+UTexture2D* AWebUIHostActor::CreateBrowserURLQRCodeTexture(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return WebUIHostComponent ? WebUIHostComponent->CreateBrowserURLQRCodeTexture(PixelsPerModule, QuietZoneModules) : nullptr;
+}
+
+UTexture2D* AWebUIHostActor::CreateEmbeddedURLQRCodeTexture(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return WebUIHostComponent ? WebUIHostComponent->CreateEmbeddedURLQRCodeTexture(PixelsPerModule, QuietZoneModules) : nullptr;
+}

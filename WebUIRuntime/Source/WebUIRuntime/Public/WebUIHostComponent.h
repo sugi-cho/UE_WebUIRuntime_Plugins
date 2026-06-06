@@ -15,6 +15,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIHostButtonClicked, FName, Bu
 
 class UWebUIRuntimeSubsystem;
 class AWebUIHostActor;
+class UTexture2D;
 
 UENUM(BlueprintType)
 enum class EWebUIHostVisibility : uint8
@@ -58,6 +59,15 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	FString GetEmbeddedURL() const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateURLQRCodeTexture(const FString& URL, int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateBrowserURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateEmbeddedURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
 
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	void RegisterWebUIButton(FName ButtonId);
