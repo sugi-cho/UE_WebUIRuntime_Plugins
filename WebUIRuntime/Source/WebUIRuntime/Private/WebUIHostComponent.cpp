@@ -4,9 +4,26 @@
 #include "WebUIRuntime.h"
 #include "WebUIRuntimeSubsystem.h"
 #include "WebUIRuntimeSettings.h"
+#include "SocketSubsystem.h"
 
 namespace
 {
+	FString GetLocalIPAddressString()
+	{
+		bool bCanBindAll = false;
+		if (ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM))
+		{
+			const TSharedRef<FInternetAddr> LocalHostAddr = SocketSubsystem->GetLocalHostAddr(*GLog, bCanBindAll);
+			const FString LocalHostAddrString = LocalHostAddr->ToString(false);
+			if (!LocalHostAddrString.IsEmpty() && !LocalHostAddrString.Equals(TEXT("127.0.0.1")))
+			{
+				return LocalHostAddrString;
+			}
+		}
+
+		return TEXT("127.0.0.1");
+	}
+
 	FString StripWebUIOrderPrefix(const FString& RawLabel)
 	{
 		int32 SeparatorIndex = INDEX_NONE;
@@ -224,6 +241,44 @@ FString UWebUIHostComponent::GetDescription() const
 		return Description;
 	}
 	return GetOwner() ? GetOwner()->GetName() : GetName();
+}
+
+FString UWebUIHostComponent::GetBrowserURL() const
+{
+	if (!GetOwner())
+	{
+		return FString();
+	}
+
+	int32 Port = 0;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+		{
+			Port = Runtime->GetServerPort();
+		}
+	}
+
+	if (Port <= 0)
+	{
+		Port = GetDefault<UWebUIRuntimeSettings>()->Port;
+	}
+
+	const bool bAllowRemote = GetDefault<UWebUIRuntimeSettings>()->bAllowRemoteAccess;
+	const FString Host = bAllowRemote ? GetLocalIPAddressString() : TEXT("localhost");
+
+	return FString::Printf(TEXT("http://%s:%d/webui?webuiId=%s"), *Host, Port, *GetWebUIId());
+}
+
+FString UWebUIHostComponent::GetEmbeddedURL() const
+{
+	const FString BrowserURL = GetBrowserURL();
+	if (BrowserURL.IsEmpty())
+	{
+		return BrowserURL;
+	}
+
+	return BrowserURL + TEXT("&embed=1");
 }
 
 void UWebUIHostComponent::RegisterWebUIButton(FName ButtonId)

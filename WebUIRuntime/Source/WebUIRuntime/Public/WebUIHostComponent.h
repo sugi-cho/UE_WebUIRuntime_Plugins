@@ -53,6 +53,12 @@ public:
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	FString GetDescription() const;
 
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	FString GetBrowserURL() const;
+
+	UFUNCTION(BlueprintPure, Category="WebUI Host")
+	FString GetEmbeddedURL() const;
+
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	void RegisterWebUIButton(FName ButtonId);
 
