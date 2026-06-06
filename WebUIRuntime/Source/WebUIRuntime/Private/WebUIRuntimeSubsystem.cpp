@@ -2,6 +2,8 @@
 
 #include "Components/ActorComponent.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/World.h"
 #include "GeneralProjectSettings.h"
@@ -23,6 +25,7 @@
 #include "Engine/Texture2D.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Canvas.h"
+#include "UObject/UnrealType.h"
 #include "Modules/ModuleManager.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "WebUIRuntimeTextureReader.h"
@@ -43,6 +46,8 @@
 #include "WebUIRuntimeSaveGame.h"
 #include "WebUIRuntimeSettings.h"
 #include "WebUIRuntime.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWebUIMobileController, Log, All);
 
 namespace
 {
@@ -354,15 +359,32 @@ class FWebUIRenderTargetWebSocketServer : public FTickableGameObject
 			{
 				Connection->ResetStreamingState();
 			}
+			else if (MessageType.Equals(TEXT("mobileControl"), ESearchCase::IgnoreCase))
+			{
+				if (MobileControlMessageHandler)
+				{
+					MobileControlMessageHandler(ConnectionId, Message.ToSharedRef());
+				}
+			}
 		}
 
 		void OnConnectionClosed(uint16 ConnectionId)
 		{
 			UE_LOG(LogWebUIRuntime, Log, TEXT("WebSocket client closed: %u"), ConnectionId);
+			if (MobileControlConnectionClosedHandler)
+			{
+				MobileControlConnectionClosedHandler(ConnectionId);
+			}
 			Connections.Remove(ConnectionId);
 		}
 
 	public:
+		void SetMobileControlHandlers(TFunction<bool(uint16, const TSharedRef<FJsonObject>&)> InMessageHandler, TFunction<void(uint16)> InConnectionClosedHandler)
+		{
+			MobileControlMessageHandler = MoveTemp(InMessageHandler);
+			MobileControlConnectionClosedHandler = MoveTemp(InConnectionClosedHandler);
+		}
+
 		void SendSchemaChanged(const FString& WebUIId)
 		{
 			TSharedRef<FJsonObject> Message = MakeShared<FJsonObject>();
@@ -391,6 +413,8 @@ class FWebUIRenderTargetWebSocketServer : public FTickableGameObject
 		TUniquePtr<IWebSocketServer> WSServer;
 		FWebSocketClientConnectedCallBack OnClientConnectedCallback;
 		TMap<uint16, TUniquePtr<FWebUIWebSocketConnection>> Connections;
+		TFunction<bool(uint16, const TSharedRef<FJsonObject>&)> MobileControlMessageHandler;
+		TFunction<void(uint16)> MobileControlConnectionClosedHandler;
 	};
 
 namespace
@@ -772,6 +796,19 @@ button{cursor:pointer;background:var(--button-bg)}
 .empty{opacity:.75;padding:16px 0}
 )HTML");
 		Html += TEXT(R"HTML(
+.mobile-controller[hidden]{display:none}
+body.mobile-controller-active .page-shell{display:none}
+.mobile-controller{position:fixed;inset:0;z-index:1000;touch-action:none;user-select:none;overscroll-behavior:none;background:#07090c;color:#e9edf2}
+.mobile-controller__zone{position:absolute;top:0;bottom:0;width:50%;overflow:hidden;border:0;background:transparent}
+.mobile-controller__left{left:0;border-right:1px solid rgba(255,255,255,.12)}
+.mobile-controller__right{right:0}
+.mobile-controller__status{position:absolute;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);padding:6px 10px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(0,0,0,.42);font-size:12px;color:rgba(255,255,255,.78);pointer-events:none}
+.mobile-controller__stick-base,.mobile-controller__stick-knob{position:absolute;border-radius:999px;pointer-events:none;display:none}
+.mobile-controller__stick-base{width:96px;height:96px;margin:-48px 0 0 -48px;border:1px solid rgba(255,255,255,.34);background:rgba(255,255,255,.06)}
+.mobile-controller__stick-knob{width:44px;height:44px;margin:-22px 0 0 -22px;background:rgba(122,163,216,.56);box-shadow:0 0 24px rgba(122,163,216,.26)}
+.mobile-controller__zone.active .mobile-controller__stick-base,.mobile-controller__zone.active .mobile-controller__stick-knob{display:block}
+)HTML");
+		Html += TEXT(R"HTML(
 .button-list{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
 button{cursor:pointer;background:var(--button-bg)}
 button.webui-button{min-width:120px;display:flex;align-items:center;justify-content:flex-start;gap:10px;padding:10px 12px;font-weight:600;letter-spacing:.01em;transition:transform .08s ease, background-color .12s ease, border-color .12s ease, opacity .12s ease, filter .12s ease}
@@ -861,6 +898,14 @@ body.embed .color-picker-group{grid-template-columns:minmax(0,1fr)}
 <div class="panel-scroll"></div>
 </main>
 </div>
+<div id="mobileController" class="mobile-controller" hidden>
+<div id="mobileMoveZone" class="mobile-controller__zone mobile-controller__left">
+<div id="mobileStickBase" class="mobile-controller__stick-base"></div>
+<div id="mobileStickKnob" class="mobile-controller__stick-knob"></div>
+</div>
+<div id="mobileLookZone" class="mobile-controller__zone mobile-controller__right"></div>
+<div id="mobileControllerStatus" class="mobile-controller__status">Disconnected</div>
+</div>
 <script>
 const app=document.getElementById('app');
 const tabsHost=app.querySelector('.tabs');
@@ -870,6 +915,7 @@ const params=url.searchParams;
 const externalLink=document.getElementById('externalLink');
 let currentWebUIId='';
 const initialWebUIId=params.get('webuiId') || params.get('webuiid') || '';
+const mobileControlToken=params.get('controlToken') || params.get('mobileControlToken') || '';
 const isEmbed=params.get('embed')==='1';
 const isCompact=params.get('compact')==='1';
 const theme=(params.get('theme')||'dark').toLowerCase();
@@ -1049,6 +1095,173 @@ function sendRenderTargetMessage(message){
   return false;
  }
 }
+)HTML");
+		Html += TEXT(R"HTML(
+let mobileControllerConfig={enabled:false,moveDeadZone:0.12};
+let mobileControllerSeq=1;
+let mobileControllerTimer=null;
+let mobileControllerVisible=false;
+let mobileMovePointerId=null;
+let mobileLookPointerId=null;
+let mobileMoveStart={x:0,y:0};
+let mobileLookLast={x:0,y:0};
+let mobileMove={x:0,y:0};
+let mobileLook={x:0,y:0};
+const mobileControllerEl=document.getElementById('mobileController');
+const mobileMoveZone=document.getElementById('mobileMoveZone');
+const mobileLookZone=document.getElementById('mobileLookZone');
+const mobileStickBase=document.getElementById('mobileStickBase');
+const mobileStickKnob=document.getElementById('mobileStickKnob');
+const mobileControllerStatus=document.getElementById('mobileControllerStatus');
+function clamp(value,min,max){return Math.max(min,Math.min(max,value));}
+function isMobileControllerEligible(){
+ const isTouchLike=(window.matchMedia&&window.matchMedia('(pointer: coarse)').matches) || navigator.maxTouchPoints>0;
+ const isLandscape=window.matchMedia&&window.matchMedia('(orientation: landscape)').matches;
+ return !!mobileControllerConfig.enabled && isTouchLike && isLandscape;
+}
+function setMobileControllerStatus(){
+ if(!mobileControllerStatus){return;}
+ if(!renderTargetSocket || renderTargetSocket.readyState!==WebSocket.OPEN){
+  mobileControllerStatus.textContent='Disconnected';
+ }else if(mobileControllerConfig.requiresControlToken && !mobileControlToken){
+  mobileControllerStatus.textContent='Control Locked';
+ }else{
+  mobileControllerStatus.textContent='Connected';
+ }
+}
+function resetMobileControllerInput(sendStop){
+ mobileMovePointerId=null;
+ mobileLookPointerId=null;
+ mobileMove={x:0,y:0};
+ mobileLook={x:0,y:0};
+ if(mobileMoveZone){mobileMoveZone.classList.remove('active');}
+ if(mobileLookZone){mobileLookZone.classList.remove('active');}
+ if(sendStop){sendMobileControllerMessage(true);}
+}
+function sendMobileControllerMessage(forceStop=false){
+ if(!mobileControllerVisible && !forceStop){return;}
+ const activeMove=!forceStop && mobileMovePointerId!==null;
+ const activeLook=!forceStop && mobileLookPointerId!==null;
+ if(!forceStop && !activeMove && !activeLook){return;}
+ if(mobileControllerConfig.requiresControlToken && !mobileControlToken){return;}
+ const message={
+  type:'mobileControl',
+  webuiId:currentWebUIId || '',
+  seq:mobileControllerSeq++,
+  timestamp:Date.now(),
+  move:{x:activeMove?mobileMove.x:0,y:activeMove?mobileMove.y:0},
+  look:{x:activeLook?mobileLook.x:0,y:activeLook?mobileLook.y:0},
+  active:{move:activeMove,look:activeLook},
+  viewport:{width:window.innerWidth,height:window.innerHeight,devicePixelRatio:window.devicePixelRatio || 1},
+  token:mobileControlToken
+ };
+ if(sendRenderTargetMessage(message)){
+  mobileLook={x:0,y:0};
+ }
+}
+function startMobileControllerTimer(){
+ if(mobileControllerTimer){return;}
+ mobileControllerTimer=setInterval(()=>sendMobileControllerMessage(false),33);
+}
+function stopMobileControllerTimer(){
+ if(!mobileControllerTimer){return;}
+ clearInterval(mobileControllerTimer);
+ mobileControllerTimer=null;
+}
+function updateMobileControllerVisibility(){
+ const shouldShow=isMobileControllerEligible();
+ mobileControllerVisible=shouldShow;
+ if(mobileControllerEl){mobileControllerEl.hidden=!shouldShow;}
+ document.body.classList.toggle('mobile-controller-active',shouldShow);
+ if(shouldShow){
+  connectRenderTargetSocket();
+  startMobileControllerTimer();
+ }else{
+  resetMobileControllerInput(true);
+  stopMobileControllerTimer();
+ }
+ setMobileControllerStatus();
+}
+function updateMobileStick(){
+ if(!mobileStickBase || !mobileStickKnob){return;}
+ const radius=72;
+ mobileStickBase.style.left=`${mobileMoveStart.x}px`;
+ mobileStickBase.style.top=`${mobileMoveStart.y}px`;
+ mobileStickKnob.style.left=`${mobileMoveStart.x + mobileMove.x*radius}px`;
+ mobileStickKnob.style.top=`${mobileMoveStart.y - mobileMove.y*radius}px`;
+}
+function handleMobileMovePointer(event){
+ if(event.pointerId!==mobileMovePointerId){return;}
+ event.preventDefault();
+ const radius=72;
+ const dx=event.clientX-mobileMoveStart.x;
+ const dy=event.clientY-mobileMoveStart.y;
+ let x=clamp(dx/radius,-1,1);
+ let y=clamp(-dy/radius,-1,1);
+ const length=Math.hypot(x,y);
+ if(length < Number(mobileControllerConfig.moveDeadZone || 0.12)){
+  x=0;
+  y=0;
+ }
+ mobileMove={x,y};
+ updateMobileStick();
+}
+function installMobileControllerEvents(){
+ if(!mobileControllerEl || !mobileMoveZone || !mobileLookZone){return;}
+ mobileMoveZone.onpointerdown=(event)=>{
+  if(!mobileControllerVisible || mobileMovePointerId!==null){return;}
+  event.preventDefault();
+  mobileMovePointerId=event.pointerId;
+  mobileMoveStart={x:event.clientX,y:event.clientY};
+  mobileMove={x:0,y:0};
+  mobileMoveZone.classList.add('active');
+  mobileMoveZone.setPointerCapture(event.pointerId);
+  updateMobileStick();
+ };
+ mobileMoveZone.onpointermove=handleMobileMovePointer;
+ const releaseMove=(event)=>{
+  if(event.pointerId!==mobileMovePointerId){return;}
+  mobileMovePointerId=null;
+  mobileMove={x:0,y:0};
+  mobileMoveZone.classList.remove('active');
+  sendMobileControllerMessage(true);
+ };
+ mobileMoveZone.onpointerup=releaseMove;
+ mobileMoveZone.onpointercancel=releaseMove;
+ mobileMoveZone.onlostpointercapture=releaseMove;
+ mobileLookZone.onpointerdown=(event)=>{
+  if(!mobileControllerVisible || mobileLookPointerId!==null){return;}
+  event.preventDefault();
+  mobileLookPointerId=event.pointerId;
+  mobileLookLast={x:event.clientX,y:event.clientY};
+  mobileLookZone.classList.add('active');
+  mobileLookZone.setPointerCapture(event.pointerId);
+ };
+ mobileLookZone.onpointermove=(event)=>{
+  if(event.pointerId!==mobileLookPointerId){return;}
+  event.preventDefault();
+  mobileLook.x+=event.clientX-mobileLookLast.x;
+  mobileLook.y+=event.clientY-mobileLookLast.y;
+  mobileLookLast={x:event.clientX,y:event.clientY};
+ };
+ const releaseLook=(event)=>{
+  if(event.pointerId!==mobileLookPointerId){return;}
+  mobileLookPointerId=null;
+  mobileLook={x:0,y:0};
+  mobileLookZone.classList.remove('active');
+  sendMobileControllerMessage(true);
+ };
+ mobileLookZone.onpointerup=releaseLook;
+ mobileLookZone.onpointercancel=releaseLook;
+ mobileLookZone.onlostpointercapture=releaseLook;
+ window.addEventListener('resize',updateMobileControllerVisibility);
+ window.addEventListener('orientationchange',updateMobileControllerVisibility);
+ document.addEventListener('visibilitychange',()=>{if(document.hidden){resetMobileControllerInput(true);}});
+ window.addEventListener('pagehide',()=>resetMobileControllerInput(true));
+}
+installMobileControllerEvents();
+)HTML");
+		Html += TEXT(R"HTML(
 function syncRenderTargetSubscription(){
  if(!renderTargetSocket || renderTargetSocket.readyState!==WebSocket.OPEN){
   return;
@@ -1124,6 +1337,7 @@ function connectRenderTargetSocket(){
    renderTargetSocketConnecting=false;
    renderTargetSocket=socket;
    window.__webuiRtStats.connected=true;
+   setMobileControllerStatus();
    syncRenderTargetSubscription();
    console.info('RenderTarget WebSocket connected', socketUrl);
   };
@@ -1158,6 +1372,7 @@ function connectRenderTargetSocket(){
    if(renderTargetSocket===socket){
     renderTargetSocket=null;
    }
+   setMobileControllerStatus();
    renderTargetSocketRetryTimer=setTimeout(connectRenderTargetSocket,1000);
   };
   socket.onerror=(error)=>{
@@ -1635,6 +1850,7 @@ async function load(){
  clearRenderTargetObjectUrls();
  const schema=await (await fetch('/api/webui/schema')).json();
  lastSchemaRevision=Number(schema.schemaRevision || 0);
+ mobileControllerConfig=schema.mobileController || {enabled:false,moveDeadZone:0.12};
   const nextRenderTargetSocketPort=Number(schema.webSocketPort || 0);
  if(renderTargetSocket && renderTargetSocketPort!==nextRenderTargetSocketPort){
   try{ renderTargetSocket.close(); }catch(_error){}
@@ -1656,6 +1872,8 @@ async function load(){
   panelScrollHost.append(empty);
   currentWebUIId='';
   syncRenderTargetSubscription();
+  connectRenderTargetSocket();
+  updateMobileControllerVisibility();
   return;
  }
  const panels=document.createElement('div');
@@ -1749,6 +1967,7 @@ async function load(){
   }
  panelScrollHost.append(panels);
  connectRenderTargetSocket();
+ updateMobileControllerVisibility();
  startSchemaPolling();
   setActive(hosts.find(host=>host.webUIId===requestedWebUIId)?.webUIId ?? hosts.find(host=>host.webUIId===restoreWebUIId)?.webUIId ?? hosts[0].webUIId);
  }
@@ -2795,6 +3014,12 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 	Root->SetNumberField(TEXT("webSocketPort"), ActiveWebSocketPort);
 	Root->SetBoolField(TEXT("renderTargetStreamingEnabled"), ActiveWebSocketPort > 0);
 	Root->SetNumberField(TEXT("schemaRevision"), SchemaRevision);
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	TSharedRef<FJsonObject> MobileControllerObject = MakeShared<FJsonObject>();
+	MobileControllerObject->SetBoolField(TEXT("enabled"), Settings && Settings->bEnableMobileController);
+	MobileControllerObject->SetBoolField(TEXT("requiresControlToken"), Settings && Settings->bRequireControlToken);
+	MobileControllerObject->SetNumberField(TEXT("moveDeadZone"), Settings ? Settings->MoveDeadZone : 0.12f);
+	Root->SetObjectField(TEXT("mobileController"), MobileControllerObject);
 	TArray<TSharedPtr<FJsonValue>> HostValues;
 
 	for (UWebUIHostComponent* Host : Hosts)
@@ -3648,6 +3873,15 @@ bool UWebUIRuntimeSubsystem::StartWebSocketServer(int32 Port)
 	const FString BindAddress = Settings && Settings->bAllowRemoteAccess ? TEXT("") : TEXT("127.0.0.1");
 
 	WebSocketServer = new FWebUIRenderTargetWebSocketServer();
+	WebSocketServer->SetMobileControlHandlers(
+		[this](uint16 ConnectionId, const TSharedRef<FJsonObject>& Message)
+		{
+			return HandleMobileControlMessage(ConnectionId, Message);
+		},
+		[this](uint16 ConnectionId)
+		{
+			HandleMobileControlConnectionClosed(ConnectionId);
+		});
 	if (!WebSocketServer->Launch(static_cast<uint16>(Port), BindAddress))
 	{
 		delete WebSocketServer;
@@ -3677,11 +3911,216 @@ void UWebUIRuntimeSubsystem::StopWebSocketServer()
 	}
 
 	ActiveWebSocketPort = 0;
+	ResetMobileControlState();
+}
+
+bool UWebUIRuntimeSubsystem::HandleMobileControlMessage(uint16 ConnectionId, const TSharedRef<FJsonObject>& Message)
+{
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	if (!Settings || !Settings->bEnableMobileController)
+	{
+		return false;
+	}
+
+	if (Settings->bRequireControlToken)
+	{
+		FString Token;
+		if (Settings->ControlToken.IsEmpty() || !Message->TryGetStringField(TEXT("token"), Token) || Token != Settings->ControlToken)
+		{
+			UE_LOG(LogWebUIMobileController, Warning, TEXT("Rejected mobile control: invalid token."));
+			return false;
+		}
+	}
+
+	if (MobileControlOwnerConnectionId.IsSet() && MobileControlOwnerConnectionId.GetValue() != ConnectionId)
+	{
+		UE_LOG(LogWebUIMobileController, Warning, TEXT("Rejected mobile control: another connection owns control."));
+		return false;
+	}
+
+	if (!MobileControlOwnerConnectionId.IsSet())
+	{
+		MobileControlOwnerConnectionId = ConnectionId;
+		UE_LOG(LogWebUIMobileController, Display, TEXT("Control owner acquired: %u"), ConnectionId);
+	}
+
+	double SequenceNumber = 0.0;
+	if (!Message->TryGetNumberField(TEXT("seq"), SequenceNumber))
+	{
+		return false;
+	}
+	const int32 Sequence = static_cast<int32>(SequenceNumber);
+	if (Sequence < MobileControlState.Sequence)
+	{
+		return false;
+	}
+
+	const TSharedPtr<FJsonObject>* MoveObject = nullptr;
+	const TSharedPtr<FJsonObject>* LookObject = nullptr;
+	const TSharedPtr<FJsonObject>* ActiveObject = nullptr;
+	if (!Message->TryGetObjectField(TEXT("move"), MoveObject) || !MoveObject || !MoveObject->IsValid() ||
+		!Message->TryGetObjectField(TEXT("look"), LookObject) || !LookObject || !LookObject->IsValid() ||
+		!Message->TryGetObjectField(TEXT("active"), ActiveObject) || !ActiveObject || !ActiveObject->IsValid())
+	{
+		return false;
+	}
+
+	double MoveX = 0.0;
+	double MoveY = 0.0;
+	double LookX = 0.0;
+	double LookY = 0.0;
+	(*MoveObject)->TryGetNumberField(TEXT("x"), MoveX);
+	(*MoveObject)->TryGetNumberField(TEXT("y"), MoveY);
+	(*LookObject)->TryGetNumberField(TEXT("x"), LookX);
+	(*LookObject)->TryGetNumberField(TEXT("y"), LookY);
+
+	bool bMoveActive = false;
+	bool bLookActive = false;
+	(*ActiveObject)->TryGetBoolField(TEXT("move"), bMoveActive);
+	(*ActiveObject)->TryGetBoolField(TEXT("look"), bLookActive);
+
+	MobileControlState.Sequence = Sequence;
+	MobileControlState.MoveAxis = FVector2D(
+		FMath::Clamp(static_cast<float>(MoveX), -1.0f, 1.0f),
+		FMath::Clamp(static_cast<float>(MoveY), -1.0f, 1.0f));
+	MobileControlState.LookDelta = FVector2D(static_cast<float>(LookX), static_cast<float>(LookY));
+	MobileControlState.bMoveActive = bMoveActive;
+	MobileControlState.bLookActive = bLookActive;
+	MobileControlState.LastReceivedTimeSeconds = FPlatformTime::Seconds();
+	return true;
+}
+
+void UWebUIRuntimeSubsystem::HandleMobileControlConnectionClosed(uint16 ConnectionId)
+{
+	if (MobileControlOwnerConnectionId.IsSet() && MobileControlOwnerConnectionId.GetValue() == ConnectionId)
+	{
+		UE_LOG(LogWebUIMobileController, Display, TEXT("Control owner released: %u"), ConnectionId);
+		ResetMobileControlState();
+	}
+}
+
+void UWebUIRuntimeSubsystem::ResetMobileControlState()
+{
+	MobileControlState = FWebUIMobileControlState();
+	MobileControlOwnerConnectionId.Reset();
+}
+
+bool UWebUIRuntimeSubsystem::TryInvokeMobileControlFunction(APawn* Pawn, FName FunctionName, const FVector2D& Value) const
+{
+	if (!IsValid(Pawn))
+	{
+		return false;
+	}
+
+	UFunction* Function = Pawn->FindFunction(FunctionName);
+	if (!Function || Function->NumParms != 1)
+	{
+		return false;
+	}
+
+	bool bHasVector2DParam = false;
+	for (TFieldIterator<FProperty> It(Function); It; ++It)
+	{
+		const FProperty* Property = *It;
+		if (!Property || !Property->HasAnyPropertyFlags(CPF_Parm) || Property->HasAnyPropertyFlags(CPF_ReturnParm))
+		{
+			continue;
+		}
+
+		const FStructProperty* StructProperty = CastField<FStructProperty>(Property);
+		bHasVector2DParam = StructProperty && StructProperty->Struct == TBaseStructure<FVector2D>::Get();
+		break;
+	}
+
+	if (!bHasVector2DParam)
+	{
+		return false;
+	}
+
+	struct FWebUIMobileVector2DParams
+	{
+		FVector2D Value;
+	};
+
+	FWebUIMobileVector2DParams Params{Value};
+	Pawn->ProcessEvent(Function, &Params);
+	return true;
+}
+
+void UWebUIRuntimeSubsystem::ApplyMobileControl(float DeltaTime)
+{
+	(void)DeltaTime;
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	if (!Settings || !Settings->bEnableMobileController || !MobileControlOwnerConnectionId.IsSet())
+	{
+		return;
+	}
+
+	const double Now = FPlatformTime::Seconds();
+	const float TimeoutSeconds = FMath::Max(0.05f, Settings->ControlTimeoutSeconds);
+	if (MobileControlState.LastReceivedTimeSeconds <= 0.0 || Now - MobileControlState.LastReceivedTimeSeconds > TimeoutSeconds)
+	{
+		ResetMobileControlState();
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	APlayerController* PlayerController = World ? UGameplayStatics::GetPlayerController(World, Settings->TargetPlayerIndex) : nullptr;
+	if (!PlayerController || !PlayerController->IsLocalController())
+	{
+		if (Now - LastMobileControlWarningTimeSeconds > 1.0)
+		{
+			UE_LOG(LogWebUIMobileController, Verbose, TEXT("No local target PlayerController."));
+			LastMobileControlWarningTimeSeconds = Now;
+		}
+		return;
+	}
+
+	APawn* Pawn = PlayerController->GetPawn();
+	if (!Pawn)
+	{
+		if (Now - LastMobileControlWarningTimeSeconds > 1.0)
+		{
+			UE_LOG(LogWebUIMobileController, Verbose, TEXT("No target Pawn."));
+			LastMobileControlWarningTimeSeconds = Now;
+		}
+		return;
+	}
+
+	const FVector2D MoveValue = MobileControlState.bMoveActive ? MobileControlState.MoveAxis * Settings->MoveScale : FVector2D::ZeroVector;
+	const float PitchSign = Settings->bInvertLookY ? 1.0f : -1.0f;
+	const FVector2D LookValue = MobileControlState.bLookActive
+		? FVector2D(MobileControlState.LookDelta.X * Settings->LookSensitivityX, MobileControlState.LookDelta.Y * Settings->LookSensitivityY * PitchSign)
+		: FVector2D::ZeroVector;
+
+	if (!MoveValue.IsNearlyZero())
+	{
+		if (!TryInvokeMobileControlFunction(Pawn, TEXT("Move"), MoveValue))
+		{
+			const FRotator ControlRot = PlayerController->GetControlRotation();
+			const FRotator YawOnlyRot(0.0f, ControlRot.Yaw, 0.0f);
+			const FVector Forward = FRotationMatrix(YawOnlyRot).GetUnitAxis(EAxis::X);
+			const FVector Right = FRotationMatrix(YawOnlyRot).GetUnitAxis(EAxis::Y);
+			Pawn->AddMovementInput(Forward, MoveValue.Y);
+			Pawn->AddMovementInput(Right, MoveValue.X);
+		}
+	}
+
+	if (!LookValue.IsNearlyZero())
+	{
+		if (!TryInvokeMobileControlFunction(Pawn, TEXT("Look"), LookValue))
+		{
+			Pawn->AddControllerYawInput(LookValue.X);
+			Pawn->AddControllerPitchInput(LookValue.Y);
+		}
+	}
+
+	MobileControlState.LookDelta = FVector2D::ZeroVector;
 }
 
 bool UWebUIRuntimeSubsystem::TickWebSocketStreaming(float DeltaTime)
 {
-	(void)DeltaTime;
+	ApplyMobileControl(DeltaTime);
 	const double Now = FPlatformTime::Seconds();
 	constexpr double StreamIntervalSeconds = RenderTargetStreamIntervalSeconds;
 

@@ -10,11 +10,22 @@ class FJsonObject;
 class FJsonValue;
 class IHttpRouter;
 class AActor;
+class APawn;
 class UActorComponent;
 class UWebUIHostComponent;
 class UWebUIImageComponent;
 class UTexture;
 struct FHttpServerRequest;
+
+struct FWebUIMobileControlState
+{
+	int32 Sequence = 0;
+	FVector2D MoveAxis = FVector2D::ZeroVector;
+	FVector2D LookDelta = FVector2D::ZeroVector;
+	bool bMoveActive = false;
+	bool bLookActive = false;
+	double LastReceivedTimeSeconds = 0.0;
+};
 
 UCLASS()
 class WEBUIRUNTIME_API UWebUIRuntimeSubsystem : public UWorldSubsystem
@@ -66,6 +77,11 @@ private:
 	bool StartWebSocketServer(int32 Port);
 	void StopWebSocketServer();
 	bool TickWebSocketStreaming(float DeltaTime);
+	bool HandleMobileControlMessage(uint16 ConnectionId, const TSharedRef<FJsonObject>& Message);
+	void HandleMobileControlConnectionClosed(uint16 ConnectionId);
+	void ApplyMobileControl(float DeltaTime);
+	void ResetMobileControlState();
+	bool TryInvokeMobileControlFunction(APawn* Pawn, FName FunctionName, const FVector2D& Value) const;
 
 	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange = true);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
@@ -90,4 +106,7 @@ private:
 	int32 SchemaRevision = 0;
 	FTSTicker::FDelegateHandle WebSocketTickHandle;
 	class FWebUIRenderTargetWebSocketServer* WebSocketServer = nullptr;
+	FWebUIMobileControlState MobileControlState;
+	TOptional<uint16> MobileControlOwnerConnectionId;
+	double LastMobileControlWarningTimeSeconds = 0.0;
 };
