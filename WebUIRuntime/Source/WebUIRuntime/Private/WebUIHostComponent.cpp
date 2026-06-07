@@ -32,6 +32,37 @@ namespace
 		return TEXT("127.0.0.1");
 	}
 
+	FString UrlEncodeQueryValue(const FString& Value)
+	{
+		FTCHARToUTF8 Converted(*Value);
+		FString Encoded;
+		Encoded.Reserve(Value.Len() * 3);
+
+		for (int32 Index = 0; Index < Converted.Length(); ++Index)
+		{
+			const uint8 Byte = static_cast<uint8>(Converted.Get()[Index]);
+			const bool bIsUnreserved =
+				(Byte >= 'A' && Byte <= 'Z') ||
+				(Byte >= 'a' && Byte <= 'z') ||
+				(Byte >= '0' && Byte <= '9') ||
+				Byte == '-' ||
+				Byte == '_' ||
+				Byte == '.' ||
+				Byte == '~';
+
+			if (bIsUnreserved)
+			{
+				Encoded.AppendChar(static_cast<TCHAR>(Byte));
+			}
+			else
+			{
+				Encoded += FString::Printf(TEXT("%%%02X"), Byte);
+			}
+		}
+
+		return Encoded;
+	}
+
 	FString StripWebUIOrderPrefix(const FString& RawLabel)
 	{
 		int32 SeparatorIndex = INDEX_NONE;
@@ -64,6 +95,19 @@ namespace
 		}
 
 		return RawLabel;
+	}
+
+	void AppendQueryParameter(FString& InURL, const FString& Key, const FString& Value)
+	{
+		if (Value.IsEmpty())
+		{
+			return;
+		}
+
+		InURL += InURL.Contains(TEXT("?")) ? TEXT("&") : TEXT("?");
+		InURL += Key;
+		InURL += TEXT("=");
+		InURL += UrlEncodeQueryValue(Value);
 	}
 
 	bool IsWebUIButtonFunction(const UFunction* Function)
@@ -595,7 +639,7 @@ FString UWebUIHostComponent::GetBrowserURL() const
 	int32 Port = 0;
 	if (const UWorld* World = GetWorld())
 	{
-		if (const UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+		if (UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
 		{
 			Port = Runtime->GetServerPort();
 		}
@@ -623,6 +667,52 @@ FString UWebUIHostComponent::GetEmbeddedURL() const
 	return BrowserURL + TEXT("&embed=1");
 }
 
+FString UWebUIHostComponent::BuildControlTokenQRCodeURL(const bool bEmbed) const
+{
+	if (!GetOwner())
+	{
+		return FString();
+	}
+
+	int32 Port = 0;
+	if (const UWorld* World = GetWorld())
+	{
+		if (const UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+		{
+			Port = Runtime->GetServerPort();
+		}
+	}
+
+	if (Port <= 0)
+	{
+		Port = GetDefault<UWebUIRuntimeSettings>()->Port;
+	}
+
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	const bool bAllowRemote = Settings && Settings->bAllowRemoteAccess;
+	const FString Host = bAllowRemote ? GetLocalIPAddressString() : TEXT("localhost");
+	UWebUIRuntimeSubsystem* Runtime = GetRuntimeSubsystem();
+	if (!Runtime)
+	{
+		return FString();
+	}
+
+	const FString Token = Runtime->GetMobileControlToken();
+	if (Token.IsEmpty())
+	{
+		return FString();
+	}
+
+	FString URL = FString::Printf(TEXT("http://%s:%d/webui"), *Host, Port);
+	AppendQueryParameter(URL, TEXT("i"), GetWebUIId());
+	if (bEmbed)
+	{
+		AppendQueryParameter(URL, TEXT("e"), TEXT("1"));
+	}
+	AppendQueryParameter(URL, TEXT("t"), Token);
+	return URL;
+}
+
 UTexture2D* UWebUIHostComponent::CreateURLQRCodeTexture(const FString& URL, const int32 PixelsPerModule, const int32 QuietZoneModules) const
 {
 	return CreateQRCodeTextureFromText(this, URL, PixelsPerModule, QuietZoneModules);
@@ -636,6 +726,16 @@ UTexture2D* UWebUIHostComponent::CreateBrowserURLQRCodeTexture(const int32 Pixel
 UTexture2D* UWebUIHostComponent::CreateEmbeddedURLQRCodeTexture(const int32 PixelsPerModule, const int32 QuietZoneModules) const
 {
 	return CreateURLQRCodeTexture(GetEmbeddedURL(), PixelsPerModule, QuietZoneModules);
+}
+
+UTexture2D* UWebUIHostComponent::CreateBrowserURLQRCodeTextureWithControlToken(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return CreateURLQRCodeTexture(BuildControlTokenQRCodeURL(false), PixelsPerModule, QuietZoneModules);
+}
+
+UTexture2D* UWebUIHostComponent::CreateEmbeddedURLQRCodeTextureWithControlToken(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return CreateURLQRCodeTexture(BuildControlTokenQRCodeURL(true), PixelsPerModule, QuietZoneModules);
 }
 
 void UWebUIHostComponent::RegisterWebUIButton(FName ButtonId)

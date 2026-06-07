@@ -54,9 +54,12 @@ public:
 
 	void SavePersistedState(UWebUIHostComponent* Host);
 	void LoadPersistedState(UWebUIHostComponent* Host);
+	FString GetMobileControlToken();
 
 private:
 	FString GetWebUITitle() const;
+	FString GenerateMobileControlToken() const;
+	void EnsureMobileControlToken();
 	bool StartServer(int32 Port);
 	bool HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
@@ -104,6 +107,7 @@ private:
 	int32 ActivePort = 0;
 	int32 ActiveWebSocketPort = 0;
 	int32 SchemaRevision = 0;
+	FString SessionMobileControlToken;
 	FTSTicker::FDelegateHandle WebSocketTickHandle;
 	class FWebUIRenderTargetWebSocketServer* WebSocketServer = nullptr;
 	FWebUIMobileControlState MobileControlState;

@@ -64,6 +64,15 @@ namespace
 		return WebUIId + TEXT("::") + ComponentId + TEXT("::") + Slot;
 	}
 
+	FString ToBase64Url(const TArray<uint8>& Bytes)
+	{
+		FString Encoded = FBase64::Encode(Bytes);
+		Encoded.ReplaceInline(TEXT("+"), TEXT("-"));
+		Encoded.ReplaceInline(TEXT("/"), TEXT("_"));
+		Encoded.ReplaceInline(TEXT("="), TEXT(""));
+		return Encoded;
+	}
+
 	class FWebUIWebSocketConnection
 	{
 	public:
@@ -914,9 +923,9 @@ const url=new URL(window.location.href);
 const params=url.searchParams;
 const externalLink=document.getElementById('externalLink');
 let currentWebUIId='';
-const initialWebUIId=params.get('webuiId') || params.get('webuiid') || '';
-const mobileControlToken=params.get('controlToken') || params.get('mobileControlToken') || '';
-const isEmbed=params.get('embed')==='1';
+const initialWebUIId=params.get('webuiId') || params.get('webuiid') || params.get('i') || '';
+const mobileControlToken=params.get('controlToken') || params.get('mobileControlToken') || params.get('t') || '';
+const isEmbed=params.get('embed')==='1' || params.get('e')==='1';
 const isCompact=params.get('compact')==='1';
 const theme=(params.get('theme')||'dark').toLowerCase();
 const isWidgetView=isEmbed;
@@ -945,6 +954,7 @@ const setScrollingState=(isScrolling)=>{
 if(externalLink){
  const externalUrl=new URL(window.location.href);
  externalUrl.searchParams.delete('embed');
+ externalUrl.searchParams.delete('e');
  externalLink.href=externalUrl.toString();
 }
 async function api(path,body){const r=await fetch(path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});return r.json();}
@@ -1097,7 +1107,7 @@ function sendRenderTargetMessage(message){
 }
 )HTML");
 		Html += TEXT(R"HTML(
-let mobileControllerConfig={enabled:false,moveDeadZone:0.12};
+let mobileControllerConfig={enabled:false,moveDeadZone:0.12,requiresControlToken:false,generateRandomTokenEachSession:true};
 let mobileControllerSeq=1;
 let mobileControllerTimer=null;
 let mobileControllerVisible=false;
@@ -1850,7 +1860,7 @@ async function load(){
  clearRenderTargetObjectUrls();
  const schema=await (await fetch('/api/webui/schema')).json();
  lastSchemaRevision=Number(schema.schemaRevision || 0);
- mobileControllerConfig=schema.mobileController || {enabled:false,moveDeadZone:0.12};
+ mobileControllerConfig=schema.mobileController || {enabled:false,moveDeadZone:0.12,requiresControlToken:false,generateRandomTokenEachSession:true};
   const nextRenderTargetSocketPort=Number(schema.webSocketPort || 0);
  if(renderTargetSocket && renderTargetSocketPort!==nextRenderTargetSocketPort){
   try{ renderTargetSocket.close(); }catch(_error){}
@@ -2586,6 +2596,7 @@ bool UWebUIRuntimeSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 bool UWebUIRuntimeSubsystem::StartServerFromSettings()
 {
 	ApplyHttpServerBindAddressSetting();
+	EnsureMobileControlToken();
 	return StartServer(GetDefault<UWebUIRuntimeSettings>()->Port);
 }
 
@@ -2593,7 +2604,53 @@ void UWebUIRuntimeSubsystem::Deinitialize()
 {
 	StopServer();
 	Hosts.Reset();
+	SessionMobileControlToken.Reset();
 	Super::Deinitialize();
+}
+
+FString UWebUIRuntimeSubsystem::GenerateMobileControlToken() const
+{
+	const FGuid Guid = FGuid::NewGuid();
+	TArray<uint8> Bytes;
+	Bytes.SetNumUninitialized(16);
+	FMemory::Memcpy(Bytes.GetData() + 0, &Guid.A, sizeof(uint32));
+	FMemory::Memcpy(Bytes.GetData() + 4, &Guid.B, sizeof(uint32));
+	FMemory::Memcpy(Bytes.GetData() + 8, &Guid.C, sizeof(uint32));
+	FMemory::Memcpy(Bytes.GetData() + 12, &Guid.D, sizeof(uint32));
+	return ToBase64Url(Bytes);
+}
+
+void UWebUIRuntimeSubsystem::EnsureMobileControlToken()
+{
+	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	if (!Settings || !Settings->bRequireControlToken)
+	{
+		return;
+	}
+
+	if (Settings->bGenerateRandomControlTokenEachSession)
+	{
+		if (SessionMobileControlToken.IsEmpty())
+		{
+			SessionMobileControlToken = GenerateMobileControlToken();
+		}
+		return;
+	}
+
+	if (SessionMobileControlToken.IsEmpty())
+	{
+		SessionMobileControlToken = Settings->ControlToken;
+		if (SessionMobileControlToken.IsEmpty())
+		{
+			SessionMobileControlToken = GenerateMobileControlToken();
+		}
+	}
+}
+
+FString UWebUIRuntimeSubsystem::GetMobileControlToken()
+{
+	EnsureMobileControlToken();
+	return SessionMobileControlToken;
 }
 
 void UWebUIRuntimeSubsystem::RegisterHost(UWebUIHostComponent* Host)
@@ -2612,6 +2669,7 @@ void UWebUIRuntimeSubsystem::UnregisterHost(UWebUIHostComponent* Host)
 bool UWebUIRuntimeSubsystem::StartServer(int32 Port)
 {
 	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
+	EnsureMobileControlToken();
 	const int32 DesiredWebSocketPort = Settings ? Settings->WebSocketPort : 0;
 
 	if (Router.IsValid() && ActivePort == Port)
@@ -3017,6 +3075,7 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 	const UWebUIRuntimeSettings* Settings = GetDefault<UWebUIRuntimeSettings>();
 	TSharedRef<FJsonObject> MobileControllerObject = MakeShared<FJsonObject>();
 	MobileControllerObject->SetBoolField(TEXT("enabled"), Settings && Settings->bEnableMobileController);
+	MobileControllerObject->SetBoolField(TEXT("generateRandomTokenEachSession"), Settings && Settings->bGenerateRandomControlTokenEachSession);
 	MobileControllerObject->SetBoolField(TEXT("requiresControlToken"), Settings && Settings->bRequireControlToken);
 	MobileControllerObject->SetNumberField(TEXT("moveDeadZone"), Settings ? Settings->MoveDeadZone : 0.12f);
 	Root->SetObjectField(TEXT("mobileController"), MobileControllerObject);
@@ -3924,8 +3983,9 @@ bool UWebUIRuntimeSubsystem::HandleMobileControlMessage(uint16 ConnectionId, con
 
 	if (Settings->bRequireControlToken)
 	{
+		const FString ExpectedToken = GetMobileControlToken();
 		FString Token;
-		if (Settings->ControlToken.IsEmpty() || !Message->TryGetStringField(TEXT("token"), Token) || Token != Settings->ControlToken)
+		if (ExpectedToken.IsEmpty() || !Message->TryGetStringField(TEXT("token"), Token) || Token != ExpectedToken)
 		{
 			UE_LOG(LogWebUIMobileController, Warning, TEXT("Rejected mobile control: invalid token."));
 			return false;

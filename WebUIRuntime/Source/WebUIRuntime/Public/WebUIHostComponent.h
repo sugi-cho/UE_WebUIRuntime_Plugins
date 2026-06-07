@@ -70,6 +70,12 @@ public:
 	UTexture2D* CreateEmbeddedURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
 
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateBrowserURLQRCodeTextureWithControlToken(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateEmbeddedURLQRCodeTextureWithControlToken(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	void RegisterWebUIButton(FName ButtonId);
 
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
@@ -145,6 +151,7 @@ public:
 	void K2_OnWebUIButtonClicked(FName ButtonId);
 
 private:
+	FString BuildControlTokenQRCodeURL(bool bEmbed) const;
 	UWebUIRuntimeSubsystem* GetRuntimeSubsystem() const;
 
 	UPROPERTY(EditAnywhere, Category="WebUI Host")

@@ -27,6 +27,9 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category="Mobile Controller", meta=(ToolTip="Enable the landscape mobile touch controller in the Web UI."))
 	bool bEnableMobileController = false;
 
+	UPROPERTY(EditAnywhere, Config, Category="Mobile Controller", meta=(ToolTip="Generate a new random control token for each PIE / session."))
+	bool bGenerateRandomControlTokenEachSession = true;
+
 	UPROPERTY(EditAnywhere, Config, Category="Mobile Controller", meta=(ClampMin="0", ToolTip="PlayerController index controlled by the mobile controller."))
 	int32 TargetPlayerIndex = 0;
 

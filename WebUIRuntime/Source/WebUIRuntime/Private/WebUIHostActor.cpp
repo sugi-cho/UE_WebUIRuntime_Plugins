@@ -118,3 +118,13 @@ UTexture2D* AWebUIHostActor::CreateEmbeddedURLQRCodeTexture(const int32 PixelsPe
 {
 	return WebUIHostComponent ? WebUIHostComponent->CreateEmbeddedURLQRCodeTexture(PixelsPerModule, QuietZoneModules) : nullptr;
 }
+
+UTexture2D* AWebUIHostActor::CreateBrowserURLQRCodeTextureWithControlToken(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return WebUIHostComponent ? WebUIHostComponent->CreateBrowserURLQRCodeTextureWithControlToken(PixelsPerModule, QuietZoneModules) : nullptr;
+}
+
+UTexture2D* AWebUIHostActor::CreateEmbeddedURLQRCodeTextureWithControlToken(const int32 PixelsPerModule, const int32 QuietZoneModules) const
+{
+	return WebUIHostComponent ? WebUIHostComponent->CreateEmbeddedURLQRCodeTextureWithControlToken(PixelsPerModule, QuietZoneModules) : nullptr;
+}

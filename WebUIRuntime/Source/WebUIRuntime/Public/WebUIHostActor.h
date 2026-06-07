@@ -63,6 +63,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category="WebUI Host")
 	UTexture2D* CreateEmbeddedURLQRCodeTexture(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
 
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateBrowserURLQRCodeTextureWithControlToken(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
+	UFUNCTION(BlueprintCallable, Category="WebUI Host")
+	UTexture2D* CreateEmbeddedURLQRCodeTextureWithControlToken(int32 PixelsPerModule = 8, int32 QuietZoneModules = 4) const;
+
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	const TArray<FName>& GetWebUIButtons() const;
 
