@@ -26,6 +26,7 @@ public class WebUIRuntime : ModuleRules
 			{
 				"HTTPServer",
 				"JsonUtilities",
+				"MediaAssets",
 				"Sockets",
 				"RenderCore",
 				"RHI",

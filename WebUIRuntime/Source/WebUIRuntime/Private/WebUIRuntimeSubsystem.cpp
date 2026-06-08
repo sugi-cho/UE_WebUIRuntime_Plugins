@@ -23,6 +23,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Engine/Texture.h"
 #include "Engine/Texture2D.h"
+#include "MediaTexture.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Engine/Canvas.h"
 #include "UObject/UnrealType.h"
@@ -58,6 +59,40 @@ namespace
 	TStrongObjectPtr<UTextureRenderTarget2D> GStreamingScratchRenderTarget;
 	int32 GStreamingScratchWidth = 0;
 	int32 GStreamingScratchHeight = 0;
+
+	bool IsReadyMediaTexture(const UTexture* Texture)
+	{
+		const UMediaTexture* MediaTexture = Cast<UMediaTexture>(Texture);
+		if (!MediaTexture)
+		{
+			return false;
+		}
+
+		const FTextureResource* Resource = MediaTexture->GetResource();
+		if (!Resource || !Resource->TextureRHI.IsValid())
+		{
+			return false;
+		}
+
+		return MediaTexture->GetSurfaceWidth() > 0.0f && MediaTexture->GetSurfaceHeight() > 0.0f;
+	}
+
+	TUniquePtr<FHttpServerResponse> MakeTransparentPngResponse()
+	{
+		const FColor TransparentPixel(0, 0, 0, 0);
+		TArray<FColor> Pixels;
+		Pixels.Add(TransparentPixel);
+		TArray64<uint8> CompressedBytes64;
+		FImageUtils::PNGCompressImageArray(1, 1, TArrayView64<const FColor>(Pixels.GetData(), Pixels.Num()), CompressedBytes64);
+		if (CompressedBytes64.IsEmpty())
+		{
+			return nullptr;
+		}
+
+		TArray<uint8> CompressedBytes;
+		CompressedBytes.Append(CompressedBytes64.GetData(), CompressedBytes64.Num());
+		return FHttpServerResponse::Create(MoveTemp(CompressedBytes), PngContentType);
+	}
 
 	FString BuildRenderTargetStreamKey(const FString& WebUIId, const FString& ComponentId, const FString& Slot)
 	{
@@ -504,8 +539,9 @@ namespace
 		ImageObject->SetStringField(TEXT("imageUrl"), MoveTemp(ImageUrl));
 		const bool bIsRenderTarget = ImageComponent->SourceTexture->IsA<UTextureRenderTarget2D>();
 		const bool bIsNDITexture = !ImageComponent->SourceTexture->IsA<UTexture2D>() && FWebUIRuntimeTextureReaderRegistry::CanReadTexture(ImageComponent->SourceTexture);
+		const bool bIsMediaTexture = ImageComponent->SourceTexture->IsA<UMediaTexture>();
 		ImageObject->SetBoolField(TEXT("streaming"), bIsRenderTarget || bIsNDITexture);
-		ImageObject->SetNumberField(TEXT("refreshMs"), bIsRenderTarget && !bUseWebSocketStreaming ? 250 : 0);
+		ImageObject->SetNumberField(TEXT("refreshMs"), (bIsRenderTarget && !bUseWebSocketStreaming) || bIsMediaTexture ? 250 : 0);
 		return ImageObject;
 	}
 
@@ -3902,11 +3938,23 @@ TUniquePtr<FHttpServerResponse> UWebUIRuntimeSubsystem::MakeImageResponse(const 
 		return nullptr;
 	}
 
+	if (ImageComponent->SourceTexture->IsA<UMediaTexture>() && !IsReadyMediaTexture(ImageComponent->SourceTexture))
+	{
+		OutError.Reset();
+		return MakeTransparentPngResponse();
+	}
+
 	TArray<uint8> CompressedBytes;
 	int32 Width = 0;
 	int32 Height = 0;
 	if (!EncodeTextureToPNG(ImageComponent->SourceTexture, ImageComponent->bForceOpaqueRenderTargetImage, CompressedBytes, Width, Height, OutError))
 	{
+		if (ImageComponent->SourceTexture->IsA<UMediaTexture>())
+		{
+			OutError.Reset();
+			return MakeTransparentPngResponse();
+		}
+
 		return nullptr;
 	}
 
