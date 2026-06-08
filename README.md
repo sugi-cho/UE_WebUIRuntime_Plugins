@@ -236,7 +236,7 @@ URL 例:
 - 公式 SDK はこちらです: [NDI Unreal Engine SDK](https://ndi.video/for-developers/ndi-unreal-engine-sdk/)
 - このリポジトリでは UE 5.7 向けの `NDIIOPlugin` を想定しています。
 - `WebUI_NDI` を有効にすると、`NDIMediaTexture2D` を `WebUIImageComponent` で表示できます。
-- `WebUINDIComponent` では `NDIMediaReceiver` を直接持たせて NDI Source を切り替えます。`NDIReceiverComponent` は不要です。
+- `WebUINDIComponent` では `NDIMediaReceiver` を直接持たせて NDI Source を切り替えます。`TargetNDIMediaReceiver` が未設定なら runtime で transient な `NDIMediaReceiver` と `NDIMediaTexture2D` を自動生成します。`On WebUI NDI Source Selected` は Details の `Events` から受け取れます。`NDIReceiverComponent` は不要です。
 - 5.7 以外の Unreal Engine では、そのままでは動作しない可能性があります。
 
 ## 注意事項

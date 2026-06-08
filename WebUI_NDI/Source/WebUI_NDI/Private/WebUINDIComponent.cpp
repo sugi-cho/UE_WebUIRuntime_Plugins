@@ -2,6 +2,7 @@
 
 #include "Services/NDIFinderService.h"
 #include "Objects/Media/NDIMediaReceiver.h"
+#include "Objects/Media/NDIMediaTexture2D.h"
 
 UWebUINDIComponent::UWebUINDIComponent()
 {
@@ -11,8 +12,15 @@ UWebUINDIComponent::UWebUINDIComponent()
 void UWebUINDIComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	EnsureTargetNDIResources();
 	RefreshNDISources();
 	ApplySelectedNDISource();
+}
+
+void UWebUINDIComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	ReleaseTargetNDIResources();
+	Super::EndPlay(EndPlayReason);
 }
 
 void UWebUINDIComponent::RefreshNDISources()
@@ -51,13 +59,16 @@ void UWebUINDIComponent::GetAvailableNDISourceOptions(TArray<FString>& OutSource
 void UWebUINDIComponent::SelectNDISource(const FString& SourceName)
 {
 	SelectedNDISource = SourceName;
-	ApplySelectedNDISource();
-	K2_OnWebUINDISourceSelected(SourceName);
+	if (ApplySelectedNDISource())
+	{
+		OnWebUINDISourceSelected.Broadcast(SourceName);
+		K2_OnWebUINDISourceSelected(SourceName);
+	}
 }
 
 bool UWebUINDIComponent::ApplySelectedNDISource()
 {
-	if (SelectedNDISource.IsEmpty() || !IsValid(TargetNDIMediaReceiver))
+	if (!EnsureTargetNDIResources() || SelectedNDISource.IsEmpty())
 	{
 		return false;
 	}
@@ -98,8 +109,47 @@ bool UWebUINDIComponent::ApplySelectedNDISource()
 
 void UWebUINDIComponent::SetTargetNDIMediaReceiver(UNDIMediaReceiver* InTargetNDIMediaReceiver)
 {
+	bOwnsTargetNDIResources = false;
 	TargetNDIMediaReceiver = InTargetNDIMediaReceiver;
 	ApplySelectedNDISource();
+}
+
+bool UWebUINDIComponent::EnsureTargetNDIResources()
+{
+	if (IsValid(TargetNDIMediaReceiver))
+	{
+		return true;
+	}
+
+	TargetNDIMediaReceiver = NewObject<UNDIMediaReceiver>(this, UNDIMediaReceiver::StaticClass(), NAME_None, RF_Transient);
+	if (!IsValid(TargetNDIMediaReceiver))
+	{
+		return false;
+	}
+
+	UNDIMediaTexture2D* TargetNDIMediaTexture = NewObject<UNDIMediaTexture2D>(
+		TargetNDIMediaReceiver, UNDIMediaTexture2D::StaticClass(), NAME_None, RF_Transient);
+	if (!IsValid(TargetNDIMediaTexture))
+	{
+		return false;
+	}
+
+	TargetNDIMediaTexture->UpdateResource();
+	TargetNDIMediaReceiver->ChangeVideoTexture(TargetNDIMediaTexture);
+	bOwnsTargetNDIResources = true;
+	return true;
+}
+
+void UWebUINDIComponent::ReleaseTargetNDIResources()
+{
+	if (IsValid(TargetNDIMediaReceiver) && bOwnsTargetNDIResources)
+	{
+		TargetNDIMediaReceiver->ChangeVideoTexture(nullptr);
+		TargetNDIMediaReceiver->Shutdown();
+	}
+
+	TargetNDIMediaReceiver = nullptr;
+	bOwnsTargetNDIResources = false;
 }
 
 void UWebUINDIComponent::HandleWebUIButtonClicked(FName ButtonId)

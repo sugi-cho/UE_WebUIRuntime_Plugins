@@ -5,7 +5,10 @@
 #include "WebUINDIComponent.generated.h"
 
 class UNDIMediaReceiver;
+class UNDIMediaTexture2D;
 struct FNDIConnectionInformation;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUINDISourceSelected, const FString&, SourceName);
 
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
 class WEBUI_NDI_API UWebUINDIComponent : public UWebUIComponentBase
@@ -15,6 +18,7 @@ class WEBUI_NDI_API UWebUINDIComponent : public UWebUIComponentBase
 public:
 	UWebUINDIComponent();
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION(BlueprintCallable, Category="WebUI|NDI", DisplayName="Refresh")
 	void RefreshNDISources();
@@ -49,6 +53,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")
 	bool bAutoRefreshSources = false;
 
+	UPROPERTY(BlueprintAssignable, Category="WebUI|NDI", meta=(DisplayName="On WebUI NDI Source Selected"))
+	FOnWebUINDISourceSelected OnWebUINDISourceSelected;
+
 protected:
 	virtual void HandleWebUIButtonClicked(FName ButtonId) override;
 
@@ -56,5 +63,9 @@ private:
 	UPROPERTY(VisibleAnywhere, Category="WebUI|NDI")
 	TArray<FString> AvailableNDISources;
 
+	bool EnsureTargetNDIResources();
+	void ReleaseTargetNDIResources();
 	void SyncWebUIButtonList();
+
+	bool bOwnsTargetNDIResources = false;
 };
