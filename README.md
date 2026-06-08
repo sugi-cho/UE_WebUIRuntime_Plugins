@@ -14,7 +14,7 @@
 ## 使い方
 
 1. Unreal Engine プロジェクトの `Plugins/` にこのリポジトリの Plugin を配置します。
-2. `UE_WebUIRuntime.uproject` で `WebUIRuntime` と必要なら `WebUI_NDI` を有効化します。
+2. 対象プロジェクトの `.uproject` で `WebUIRuntime` と必要なら `WebUI_NDI` を有効化します。
 3. Project Settings の `Plugins > Web UI Runtime` で `Port` を設定します。
 4. 同じ画面の `Allow Remote Access` を有効にすると、LAN 内の端末からもアクセスできます。
 5. `WebUIHostComponent` を持つ Actor を配置して Web UI を起動します。
@@ -75,6 +75,9 @@
   - HTTP 経由で静的画像として配信します。
 - `RenderTarget`
   - WebSocket 経由でフレーム配信します。
+- `MediaTexture`
+  - HTTP 経由で定期更新します。
+  - 再生前は透明画像を返し、準備ができたら自動的に表示します。
 - `NDI`
   - `WebUI_NDI` を有効にすると、`NDIMediaTexture2D` も `WebUIImageComponent` の `SourceTexture` として扱えます。
   - NDI テクスチャは内部的にフレーム読み出しして表示します。
