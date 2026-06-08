@@ -23,6 +23,9 @@
 複数の Actor が `WebUIHostComponent` を持つ場合、Web UI は `WebUIId` ごとのタブで切り替えます。
 タブ名は `WebUIId` を使います。
 タブ下の説明には `WebUIHostComponent` の `Description` を表示します。
+WebUI に出すボタンやパラメータは、名前の先頭に `00_` のようなプレフィックスを付けて管理します。
+`WUI00_` のような互換プレフィックスも同じく並び順として扱えます。
+数字部分は並び順に使われ、表示時はプレフィックスを除いた名前だけが UI に出ます。
 
 ## `WebUIHostComponent` について
 
@@ -48,6 +51,7 @@
 - たとえば NDI 用の `WebUINDIComponent` のように、用途ごとに派生 Component を追加できます。
 - `WebUIHostComponent` を持つ Actor には、Actor 自身の `WebUI` 変数も上段に表示され、その下に Component ごとのセクションが並びます。
 - `WebUIHostComponent` のボタンは、Actor セクション内の共通コントロールとして表示されます。
+- WebUI に出す対象は `WUI00_` などの名前規則で判定します。
 
 ## 画像表示
 
@@ -98,13 +102,14 @@
 
 ## Property を WebUI に出す方法
 
-1. 対象の `UPROPERTY` を `Category="WebUI"` にします。
-2. もしくは `meta=(WebUI)` を付けます。
-3. UE の Details 上で `Web UI` に見えるカテゴリも同義として扱います。
-4. 対応型の値だけが WebUI に出ます。
-5. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
-6. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
-7. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
+1. 対象の `UPROPERTY` 名を `00_` のような形式にします。
+2. `WUI00_` のような形式も互換として使えます。
+3. 数字は並び順に使われます。
+4. 表示名はプレフィックスを除いた部分になります。
+5. 対応型の値だけが WebUI に出ます。
+6. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
+7. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
+8. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
 
 ### 対応型
 
@@ -138,25 +143,24 @@ JSON での入力例:
 
 `TArray` / `TMap` / `TSet` / 任意の `UStruct` / オブジェクト参照は、この実装では対象外です。
 
-```cpp
-UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI")
-float Brightness;
+Blueprint 側の例:
 
-UPROPERTY(EditAnywhere, BlueprintReadWrite, meta=(WebUI))
-FLinearColor Tint;
-```
+- `00_Brightness`
+- `01_Tint`
 
 WebUI 上で値を変更すると、UE 側の変数が更新され、その後 `OnWebUI...Changed` 系イベントが呼ばれます。
 
 ## Button の作り方
 
-1. `WebUIComponentBase` か派生 Component で `RegisterWebUIButton("ButtonName")` を呼びます。
-2. `WebUIHostActor` から呼んだ場合も、内部の `WebUIHostComponent` のボタンとして扱われます。
-3. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
+1. `WebUIComponentBase` か派生 Component で `RegisterWebUIButton("00_ButtonName")` を呼びます。
+2. `WUI00_` のような形式も互換として扱えます。
+3. 数字は並び順に使われ、表示時は取り除かれます。
+4. `WebUIHostActor` から呼んだ場合も、内部の `WebUIHostComponent` のボタンとして扱われます。
+5. `OnWebUIButtonClicked(ButtonId)` を実装して押下処理を書きます。
 
 ```cpp
-RegisterWebUIButton(TEXT("Apply"));
-RegisterWebUIButton(TEXT("Reset"));
+RegisterWebUIButton(TEXT("00_Apply"));
+RegisterWebUIButton(TEXT("01_Reset"));
 ```
 
 Button は Property と同じく WebUI に表示され、クリックで UE 側のイベントに戻ります。

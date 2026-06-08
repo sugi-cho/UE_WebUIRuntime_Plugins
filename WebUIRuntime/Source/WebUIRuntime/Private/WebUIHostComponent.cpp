@@ -9,6 +9,41 @@
 
 namespace
 {
+	bool IsWebUIButtonFunction(const UFunction* Function)
+	{
+		if (!Function || Function->NumParms != 0 || Function->HasAnyFunctionFlags(FUNC_BlueprintPure | FUNC_Event))
+		{
+			return false;
+		}
+
+		const FString FunctionName = Function->GetName();
+		int32 OrderStart = 0;
+		if (FunctionName.StartsWith(TEXT("WUI"), ESearchCase::IgnoreCase))
+		{
+			OrderStart = 3;
+		}
+
+		int32 PrefixEnd = OrderStart;
+		while (PrefixEnd < FunctionName.Len() && FChar::IsDigit(FunctionName[PrefixEnd]))
+		{
+			++PrefixEnd;
+		}
+
+		if (PrefixEnd <= OrderStart || PrefixEnd >= FunctionName.Len())
+		{
+			return false;
+		}
+
+		const TCHAR Separator = FunctionName[PrefixEnd];
+		if (Separator != TEXT('_') && Separator != TEXT(' '))
+		{
+			return false;
+		}
+
+		int64 ParsedOrder = 0;
+		return LexTryParseString(ParsedOrder, *FunctionName.Mid(OrderStart, PrefixEnd - OrderStart)) && ParsedOrder >= 0;
+	}
+
 	constexpr int32 QRCodeVersion = 5;
 	constexpr int32 QRCodeSize = 17 + QRCodeVersion * 4;
 	constexpr int32 QRCodeDataCodewords = 108;
@@ -65,28 +100,18 @@ namespace
 
 	FString StripWebUIOrderPrefix(const FString& RawLabel)
 	{
-		int32 SeparatorIndex = INDEX_NONE;
-		for (int32 Index = 0; Index < RawLabel.Len(); ++Index)
+		if (RawLabel.StartsWith(TEXT("WUI"), ESearchCase::IgnoreCase))
 		{
-			const TCHAR Char = RawLabel[Index];
-			if (Char == TEXT('_') || Char == TEXT(' '))
+			int32 PrefixEnd = 3;
+			int32 DigitStart = PrefixEnd;
+			while (PrefixEnd < RawLabel.Len() && FChar::IsDigit(RawLabel[PrefixEnd]))
 			{
-				SeparatorIndex = Index;
-				break;
+				++PrefixEnd;
 			}
-			if (!FChar::IsDigit(Char))
-			{
-				return RawLabel;
-			}
-		}
 
-		if (SeparatorIndex > 0 && SeparatorIndex < RawLabel.Len())
-		{
-			const FString Prefix = RawLabel.Left(SeparatorIndex);
-			int64 ParsedOrder = 0;
-			if (LexTryParseString(ParsedOrder, *Prefix) && ParsedOrder >= 0)
+			if (PrefixEnd > DigitStart && PrefixEnd < RawLabel.Len() && RawLabel[PrefixEnd] == TEXT('_'))
 			{
-				const FString DisplayLabel = RawLabel.Mid(SeparatorIndex + 1);
+				const FString DisplayLabel = RawLabel.Mid(PrefixEnd + 1);
 				if (!DisplayLabel.IsEmpty())
 				{
 					return DisplayLabel;
@@ -108,18 +133,6 @@ namespace
 		InURL += Key;
 		InURL += TEXT("=");
 		InURL += UrlEncodeQueryValue(Value);
-	}
-
-	bool IsWebUIButtonFunction(const UFunction* Function)
-	{
-		if (!Function || Function->NumParms != 0 || !Function->HasMetaData(TEXT("Category")))
-		{
-			return false;
-		}
-
-		FString Normalized = Function->GetMetaData(TEXT("Category"));
-		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
-		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
 	}
 
 	FName ResolveWebUIButtonId(const TArray<FName>& Buttons, const FName RequestedButtonId)

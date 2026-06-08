@@ -4,10 +4,51 @@
 
 namespace
 {
+	bool IsWebUIButtonFunction(const UFunction* Function)
+	{
+		if (!Function || Function->NumParms != 0 || Function->HasAnyFunctionFlags(FUNC_BlueprintPure | FUNC_Event))
+		{
+			return false;
+		}
+
+		const FString FunctionName = Function->GetName();
+		int32 OrderStart = 0;
+		if (FunctionName.StartsWith(TEXT("WUI"), ESearchCase::IgnoreCase))
+		{
+			OrderStart = 3;
+		}
+
+		int32 PrefixEnd = OrderStart;
+		while (PrefixEnd < FunctionName.Len() && FChar::IsDigit(FunctionName[PrefixEnd]))
+		{
+			++PrefixEnd;
+		}
+
+		if (PrefixEnd <= OrderStart || PrefixEnd >= FunctionName.Len())
+		{
+			return false;
+		}
+
+		const TCHAR Separator = FunctionName[PrefixEnd];
+		if (Separator != TEXT('_') && Separator != TEXT(' '))
+		{
+			return false;
+		}
+
+		int64 ParsedOrder = 0;
+		return LexTryParseString(ParsedOrder, *FunctionName.Mid(OrderStart, PrefixEnd - OrderStart)) && ParsedOrder >= 0;
+	}
+
 	FString StripWebUIOrderPrefix(const FString& RawLabel)
 	{
+		int32 OrderStart = 0;
+		if (RawLabel.StartsWith(TEXT("WUI"), ESearchCase::IgnoreCase))
+		{
+			OrderStart = 3;
+		}
+
 		int32 SeparatorIndex = INDEX_NONE;
-		for (int32 Index = 0; Index < RawLabel.Len(); ++Index)
+		for (int32 Index = OrderStart; Index < RawLabel.Len(); ++Index)
 		{
 			const TCHAR Char = RawLabel[Index];
 			if (Char == TEXT('_') || Char == TEXT(' '))
@@ -21,9 +62,9 @@ namespace
 			}
 		}
 
-		if (SeparatorIndex > 0 && SeparatorIndex < RawLabel.Len())
+		if (SeparatorIndex > OrderStart && SeparatorIndex < RawLabel.Len())
 		{
-			const FString Prefix = RawLabel.Left(SeparatorIndex);
+			const FString Prefix = RawLabel.Mid(OrderStart, SeparatorIndex - OrderStart);
 			int64 ParsedOrder = 0;
 			if (LexTryParseString(ParsedOrder, *Prefix) && ParsedOrder >= 0)
 			{
@@ -36,18 +77,6 @@ namespace
 		}
 
 		return RawLabel;
-	}
-
-	bool IsWebUIButtonFunction(const UFunction* Function)
-	{
-		if (!Function || Function->NumParms != 0 || !Function->HasMetaData(TEXT("Category")))
-		{
-			return false;
-		}
-
-		FString Normalized = Function->GetMetaData(TEXT("Category"));
-		Normalized.ReplaceInline(TEXT(" "), TEXT(""));
-		return Normalized.Equals(TEXT("WebUI"), ESearchCase::IgnoreCase);
 	}
 
 	FName ResolveWebUIButtonId(const TArray<FName>& Buttons, const FName RequestedButtonId)
