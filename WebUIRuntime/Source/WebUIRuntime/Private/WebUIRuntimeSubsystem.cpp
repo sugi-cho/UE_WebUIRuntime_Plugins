@@ -1023,6 +1023,20 @@ function createRow(p){
  row.append(name,control);
  return {label:row,control};
 }
+function renderCollapsibleSection(webUIId,sectionId,title,defaultExpanded,contentBuilder){
+ const section=document.createElement('details');
+ section.className='component';
+ section.open=defaultExpanded!==false;
+ section.dataset.webuiId=String(webUIId || '');
+ section.dataset.sectionId=String(sectionId || '');
+ const summary=document.createElement('summary');
+ summary.textContent=title;
+ const body=document.createElement('div');
+ body.className='component-body';
+ contentBuilder(body);
+ section.append(summary,body);
+ return section;
+}
 function isHostVisibleForCurrentSurface(host){
  const target=String(host.displayTarget || 'Both');
  if(target==='Both'){return true;}
@@ -1872,19 +1886,19 @@ function renderButtonRow(host,ownerType,componentId,buttons){
  return buttonRow;
 }
 function renderComponent(host,c){
- const cs=document.createElement('section');
- cs.className='component';
- if(c.showTitle!==false){
-  cs.innerHTML=`<h3>${c.displayName || c.name}</h3>`;
- }
- cs.append(renderProperties(host,'component',c.componentId,c.properties));
- const inlineImages=(c.images||[]).filter(image=>String(image.slot||'')==='Inline');
- if(inlineImages.length){
-  cs.append(renderImageStrip(host.webUIId,inlineImages,'inline'));
- }
- const buttonRow=renderButtonRow(host,'component',c.componentId,c.buttons);
- if(c.buttons.length){ cs.append(buttonRow); }
- return cs;
+ const sectionId=`component::${String(c.componentId || '')}`;
+ const title=c.displayName || c.name || c.componentId || 'Component';
+ return renderCollapsibleSection(host.webUIId,sectionId,title,c.expanded!==false,body=>{
+  if((c.properties||[]).length){
+   body.append(renderProperties(host,'component',c.componentId,c.properties));
+  }
+  const inlineImages=(c.images||[]).filter(image=>String(image.slot||'')==='Inline');
+  if(inlineImages.length){
+   body.append(renderImageStrip(host.webUIId,inlineImages,'inline'));
+  }
+  const buttonRow=renderButtonRow(host,'component',c.componentId,c.buttons);
+  if((c.buttons||[]).length){ body.append(buttonRow); }
+ });
 }
 async function load(){
  const restoreWebUIId=currentWebUIId;
@@ -1992,18 +2006,17 @@ async function load(){
    panelBody.dataset.webuiBody=host.webUIId;
    bodyByWebUIId.set(host.webUIId,panelBody);
    if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
-    const actorSection=document.createElement('section');
-    actorSection.className='component';
-    if((host.actorProperties||[]).length){
-    actorSection.append(renderProperties(host,'actor','',host.actorProperties));
-   }
-   if((host.actorButtons||[]).length){
-    actorSection.append(renderButtonRow(host,'actor','',host.actorButtons));
-   }
-    if((host.hostButtons||[]).length){
-     actorSection.append(renderButtonRow(host,'host','',host.hostButtons));
-    }
-    panelBody.append(actorSection);
+    panelBody.append(renderCollapsibleSection(host.webUIId,'actor','Actor',true,body=>{
+     if((host.actorProperties||[]).length){
+      body.append(renderProperties(host,'actor','',host.actorProperties));
+     }
+     if((host.actorButtons||[]).length){
+      body.append(renderButtonRow(host,'actor','',host.actorButtons));
+     }
+     if((host.hostButtons||[]).length){
+      body.append(renderButtonRow(host,'host','',host.hostButtons));
+     }
+    }));
    }
    for(const c of host.components||[]){
     panelBody.append(renderComponent(host,c));
@@ -3318,6 +3331,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	ComponentObject->SetStringField(TEXT("displayName"), ComponentDisplayName);
 	ComponentObject->SetStringField(TEXT("className"), Component->GetClass()->GetName());
 	ComponentObject->SetBoolField(TEXT("showTitle"), !Cast<UWebUIImageComponent>(Component) || CastChecked<UWebUIImageComponent>(Component)->IsWebUIImageEnabled());
+	ComponentObject->SetBoolField(TEXT("expanded"), !WebUIComponent || WebUIComponent->IsWebUIExpandedByDefault());
 	ComponentObject->SetArrayField(TEXT("properties"), PropertyValues);
 	ComponentObject->SetArrayField(TEXT("buttons"), ButtonValues);
 	ComponentObject->SetArrayField(TEXT("images"), ImageValues);

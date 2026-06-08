@@ -14,6 +14,9 @@ class WEBUIRUNTIME_API UWebUIComponentBase : public UActorComponent
 public:
 	UWebUIComponentBase();
 
+	UFUNCTION(BlueprintPure, Category="WebUI")
+	bool IsWebUIExpandedByDefault() const { return bWebUIExpandedByDefault; }
+
 	UFUNCTION(BlueprintCallable, Category="WebUI")
 	void RegisterWebUIButton(FName ButtonId);
 
@@ -79,6 +82,9 @@ protected:
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI Internal", meta=(AllowPrivateAccess="true"))
 	FString WebUIDisplayName;
+
+	UPROPERTY(EditAnywhere, Category="WebUI Internal", meta=(DisplayName="Expanded By Default"))
+	bool bWebUIExpandedByDefault = true;
 
 	UPROPERTY(EditAnywhere, Category="WebUI")
 	TArray<FName> WebUIButtons;
