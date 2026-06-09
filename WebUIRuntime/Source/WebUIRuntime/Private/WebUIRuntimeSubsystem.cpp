@@ -850,9 +850,13 @@ body.theme-dark{--page-bg:rgba(16,18,22,0.98);--shell-bg:#101216;--panel-bg:#171
  .panel-body::-webkit-scrollbar{width:10px;height:10px;background:transparent}
  .panel-body::-webkit-scrollbar-track{background:transparent}
  .panel-body::-webkit-scrollbar-thumb{background:transparent;border-radius:999px;border:2px solid transparent;background-clip:padding-box;transition:background-color .15s ease}
- body.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.32)}
- body.theme-light.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(16,18,22,.28)}
+body.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.32)}
+body.theme-light.scrolling .panel-body::-webkit-scrollbar-thumb{background:rgba(16,18,22,.28)}
 .host-meta{opacity:.78;margin-top:4px;white-space:pre-wrap;overflow-wrap:anywhere}
+.host-header-info{display:flex;flex-direction:column;gap:8px;min-width:0}
+.host-inline-editor{display:flex;flex-direction:column;gap:8px;min-width:0}
+.host-inline-editor .property-row:first-child{margin-top:0}
+.host-inline-editor .button-list{margin:0}
 .component{border-top:1px solid var(--border);padding-top:12px;margin-top:12px;min-width:0}
 .property-row{display:grid;grid-template-columns:180px minmax(0,1fr);column-gap:12px;row-gap:6px;align-items:center;margin:10px 0;padding:10px 0;border-bottom:1px solid var(--border-subtle);min-width:0}
 .property-name{padding-top:2px;min-width:0;overflow-wrap:anywhere;word-break:break-word}
@@ -950,10 +954,12 @@ body.embed .color-picker-group{grid-template-columns:minmax(0,1fr)}
  .external-link{display:none}
  .tabs{padding-left:4px;gap:4px;margin-top:8px}
  .tab{padding:8px 10px;border-radius:10px 10px 0 0}
- .panel-header{padding:10px 10px 0}
- .panel-body{padding:0 10px 10px}
- .host-meta{margin-top:2px}
- .component{padding-top:10px;margin-top:10px}
+.panel-header{padding:10px 10px 0}
+.panel-body{padding:0 10px 10px}
+.host-meta{margin-top:2px}
+.host-header-info{gap:6px}
+.host-inline-editor{gap:6px}
+.component{padding-top:10px;margin-top:10px}
  .property-row{grid-template-columns:minmax(84px,34vw) minmax(0,1fr);column-gap:8px;row-gap:4px;margin:8px 0;padding:8px 0;border-bottom:1px solid var(--border-subtle)}
  .property-name{padding-top:0;font-size:13px}
  .property-control{gap:6px}
@@ -1902,6 +1908,29 @@ function renderProperties(host,ownerType,componentId,properties){
 	}
 	return section;
 }
+function renderStaticSection(title,contentBuilder){
+ const section=document.createElement('section');
+ section.className='component';
+ const body=document.createElement('div');
+ body.className='component-body';
+ contentBuilder(body);
+ section.append(body);
+ return section;
+}
+function renderInlineActorEditor(host){
+ const editor=document.createElement('div');
+ editor.className='host-inline-editor';
+ if((host.actorProperties||[]).length){
+  editor.append(renderProperties(host,'actor','',host.actorProperties));
+ }
+ if((host.actorButtons||[]).length){
+  editor.append(renderButtonRow(host,'actor','',host.actorButtons));
+ }
+ if((host.hostButtons||[]).length){
+  editor.append(renderButtonRow(host,'host','',host.hostButtons));
+ }
+ return editor;
+}
 	)HTML");
 		Html += TEXT(R"HTML(
 function renderButtonRow(host,ownerType,componentId,buttons){
@@ -2033,37 +2062,35 @@ async function load(){
    const panelHeader=document.createElement('div');
    panelHeader.className='panel-header';
    const previewImages=(host.images||[]).filter(image=>String(image.slot||'')==='Preview');
+   const headerInfo=document.createElement('div');
+   headerInfo.className='host-header-info';
+   const headerTitle=document.createElement('h2');
+   headerTitle.textContent=host.displayName || host.webUIId;
+   const headerMeta=document.createElement('div');
+   headerMeta.className='host-meta';
+   headerMeta.textContent=host.description || host.actorName;
+   headerInfo.append(headerTitle,headerMeta);
+   if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
+    headerInfo.append(renderInlineActorEditor(host));
+   }
    if(previewImages.length){
     const previewLayout=document.createElement('div');
     previewLayout.className='preview-layout';
     const previewInfo=document.createElement('div');
     previewInfo.className='preview-info';
-    previewInfo.innerHTML=`<h2>${host.displayName || host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+    previewInfo.append(headerInfo);
     const previewMedia=document.createElement('div');
     previewMedia.className='preview-media';
     previewMedia.append(renderImageStrip(host.webUIId,previewImages,'preview'));
     previewLayout.append(previewInfo,previewMedia);
     panelHeader.append(previewLayout);
    }else{
-    panelHeader.innerHTML=`<h2>${host.displayName || host.webUIId}</h2><div class="host-meta">${host.description || host.actorName}</div>`;
+    panelHeader.append(headerInfo);
    }
    const panelBody=document.createElement('div');
    panelBody.className='panel-body';
    panelBody.dataset.webuiBody=host.webUIId;
    bodyByWebUIId.set(host.webUIId,panelBody);
-   if((host.actorProperties||[]).length || (host.actorButtons||[]).length || (host.hostButtons||[]).length){
-    panelBody.append(renderCollapsibleSection(host.webUIId,'actor','Actor',true,body=>{
-     if((host.actorProperties||[]).length){
-      body.append(renderProperties(host,'actor','',host.actorProperties));
-     }
-     if((host.actorButtons||[]).length){
-      body.append(renderButtonRow(host,'actor','',host.actorButtons));
-     }
-     if((host.hostButtons||[]).length){
-      body.append(renderButtonRow(host,'host','',host.hostButtons));
-     }
-    }));
-   }
    for(const c of host.components||[]){
     panelBody.append(renderComponent(host,c));
    }
