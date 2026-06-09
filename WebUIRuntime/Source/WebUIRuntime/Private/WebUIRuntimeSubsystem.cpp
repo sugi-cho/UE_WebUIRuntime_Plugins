@@ -36,6 +36,7 @@
 #include "IWebSocketServer.h"
 #include "INetworkingWebSocket.h"
 #include "WebUIComponentBase.h"
+#include "WebUIFileBrowserComponent.h"
 #include "WebUIHostActor.h"
 #include "WebUIHostComponent.h"
 #include "WebUIImageComponent.h"
@@ -889,6 +890,24 @@ body.theme-light .color-swatch,body.theme-light .linear-color-swatch{background:
 button{cursor:pointer;background:var(--button-bg)}
 .row{margin:8px 0}
 .empty{opacity:.75;padding:16px 0}
+)HTML");
+		Html += TEXT(R"HTML(
+.file-browser{display:flex;flex-direction:column;gap:8px;margin:10px 0;min-width:0}
+.file-browser__toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid var(--border-subtle);border-radius:8px;background:rgba(255,255,255,.03);min-width:0}
+.file-browser__root-label{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-browser__tree{display:flex;flex-direction:column;gap:2px;min-width:0}
+.file-browser__children{display:flex;flex-direction:column;gap:2px;margin-left:18px;border-left:1px solid var(--border-subtle);padding-left:8px;min-width:0}
+.file-browser__row{display:flex;align-items:center;gap:6px;width:100%;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);text-align:left;min-width:0}
+.file-browser__row:hover{border-color:var(--border-subtle);background:rgba(255,255,255,.04)}
+.file-browser__row--selected{border-color:var(--border-strong);background:rgba(122,163,216,.18)}
+.file-browser__row--pending{opacity:.72}
+.file-browser__twisty{width:18px;flex:0 0 18px;text-align:center;opacity:.75}
+.file-browser__icon{width:18px;flex:0 0 18px;text-align:center;opacity:.9}
+.file-browser__name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-browser__meta{margin-left:auto;opacity:.62;font-size:.86em;white-space:nowrap}
+.file-browser__message{opacity:.72;padding:8px 10px;border:1px dashed var(--border-subtle);border-radius:6px}
+.file-browser__error{color:#ffb4b4;border-color:rgba(255,120,120,.35)}
+body.theme-light .file-browser__error{color:#8a1f1f}
 )HTML");
 		Html += TEXT(R"HTML(
 .mobile-controller[hidden]{display:none}
@@ -1931,7 +1950,242 @@ function renderInlineActorEditor(host){
  }
  return editor;
 }
-	)HTML");
+)HTML");
+		Html += TEXT(R"HTML(
+const fileBrowserStates=new Map();
+function getFileBrowserKey(host,c){return `${host.webUIId || ''}::${c.componentId || ''}`;}
+function getFileBrowserState(host,c){
+ const key=getFileBrowserKey(host,c);
+ let state=fileBrowserStates.get(key);
+ if(!state){
+  state={children:new Map(),expanded:new Set(),loading:new Set(),errors:new Map(),selectedRelativePath:null,pendingSelection:null,rootElement:null};
+  fileBrowserStates.set(key,state);
+ }
+ const customView=c.customView||{};
+ if(customView.selectedRelativePath!==undefined && customView.selectedRelativePath!==null){state.selectedRelativePath=customView.selectedRelativePath || null;}
+ return state;
+}
+function fileBrowserUrl(host,c,relativePath){
+ const customView=c.customView||{};
+ const url=new URL(customView.listEndpoint || '/api/webui/file-browser/list', window.location.origin);
+ url.searchParams.set('webuiId', host.webUIId || '');
+ url.searchParams.set('componentId', c.componentId || '');
+ url.searchParams.set('relativePath', relativePath || '');
+ return url.toString();
+}
+async function fetchFileBrowserList(host,c,relativePath){
+ const response=await fetch(fileBrowserUrl(host,c,relativePath),{cache:'no-store'});
+ const payload=await response.json();
+ if(!payload.ok){throw new Error(payload.error || 'Failed to list directory.');}
+ return payload;
+}
+async function postFileBrowserSelect(host,c,relativePath){
+ const customView=c.customView||{};
+ const response=await fetch(customView.selectEndpoint || '/api/webui/file-browser/select',{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({webUIId:host.webUIId || '',componentId:c.componentId || '',relativePath:relativePath || ''})
+ });
+ const payload=await response.json();
+ if(!payload.ok){throw new Error(payload.error || 'Failed to select file.');}
+ return payload;
+}
+function clearNode(node){while(node.firstChild){node.removeChild(node.firstChild);}}
+function fileBrowserFormatSize(size){
+ const n=Number(size||0);
+ if(!Number.isFinite(n) || n<=0){return '';}
+ if(n<1024){return `${n} B`;}
+ if(n<1024*1024){return `${(n/1024).toFixed(1)} KB`;}
+ if(n<1024*1024*1024){return `${(n/1024/1024).toFixed(1)} MB`;}
+ return `${(n/1024/1024/1024).toFixed(1)} GB`;
+}
+async function loadFileBrowserChildren(root,state,host,c,relativePath,force=false){
+ const path=relativePath || '';
+ if(!force && state.children.has(path)){return;}
+ state.loading.add(path);
+ state.errors.delete(path);
+ renderFileBrowserInto(root,state,host,c);
+ try{
+  const payload=await fetchFileBrowserList(host,c,path);
+  const normalizedPath=payload.relativePath || path;
+  state.children.set(normalizedPath,payload.entries || []);
+  if(payload.selectedRelativePath!==undefined){state.selectedRelativePath=payload.selectedRelativePath || null;}
+  if(normalizedPath!==path){state.children.delete(path);}
+ }catch(error){
+  state.errors.set(path,error && error.message ? error.message : String(error));
+ }finally{
+  state.loading.delete(path);
+  renderFileBrowserInto(root,state,host,c);
+ }
+}
+async function selectFileBrowserEntry(root,state,host,c,entry){
+ state.pendingSelection=entry.relativePath;
+ state.errors.delete(entry.relativePath || '');
+ renderFileBrowserInto(root,state,host,c);
+ try{
+  const payload=await postFileBrowserSelect(host,c,entry.relativePath);
+  state.selectedRelativePath=payload.selectedRelativePath || entry.relativePath;
+ }catch(error){
+  state.errors.set(entry.relativePath || '',error && error.message ? error.message : String(error));
+ }finally{
+  state.pendingSelection=null;
+  renderFileBrowserInto(root,state,host,c);
+ }
+}
+)HTML");
+		Html += TEXT(R"HTML(
+function renderFileBrowserEntry(root,state,host,c,entry){
+ const isDirectory=entry.type==='directory';
+ const isExpanded=state.expanded.has(entry.relativePath);
+ const row=document.createElement('button');
+ row.type='button';
+ row.className='file-browser__row';
+ if(!isDirectory && state.selectedRelativePath && String(entry.relativePath).toLowerCase()===String(state.selectedRelativePath).toLowerCase()){
+  row.classList.add('file-browser__row--selected');
+ }
+ if(state.pendingSelection===entry.relativePath){row.classList.add('file-browser__row--pending');}
+ const twisty=document.createElement('span');
+ twisty.className='file-browser__twisty';
+ twisty.textContent=isDirectory ? (isExpanded ? 'v' : '>') : '';
+ const icon=document.createElement('span');
+ icon.className='file-browser__icon';
+ icon.textContent=isDirectory ? 'dir' : 'file';
+ const name=document.createElement('span');
+ name.className='file-browser__name';
+ name.textContent=entry.name || entry.relativePath || '';
+ const meta=document.createElement('span');
+ meta.className='file-browser__meta';
+ meta.textContent=isDirectory ? '' : fileBrowserFormatSize(entry.size);
+ row.append(twisty,icon,name,meta);
+ row.title=entry.relativePath || entry.name || '';
+ if(isDirectory){
+  row.onclick=()=>{
+   if(isExpanded){
+    state.expanded.delete(entry.relativePath);
+    renderFileBrowserInto(root,state,host,c);
+    return;
+   }
+   state.expanded.add(entry.relativePath);
+   if(!state.children.has(entry.relativePath)){
+    loadFileBrowserChildren(root,state,host,c,entry.relativePath,false);
+   }else{
+    renderFileBrowserInto(root,state,host,c);
+   }
+  };
+ }else{
+  row.onclick=()=>selectFileBrowserEntry(root,state,host,c,entry);
+ }
+ const wrapper=document.createElement('div');
+ wrapper.append(row);
+ const path=entry.relativePath || '';
+ if(isDirectory && isExpanded){
+  const children=document.createElement('div');
+  children.className='file-browser__children';
+  if(state.loading.has(path)){
+   const loading=document.createElement('div');
+   loading.className='file-browser__message';
+   loading.textContent='Loading...';
+   children.append(loading);
+  }else if(state.errors.has(path)){
+   const error=document.createElement('div');
+   error.className='file-browser__message file-browser__error';
+   error.textContent=state.errors.get(path);
+   children.append(error);
+  }else if(state.children.has(path)){
+   const entries=state.children.get(path) || [];
+   if(entries.length){
+    for(const child of entries){children.append(renderFileBrowserEntry(root,state,host,c,child));}
+   }else{
+    const empty=document.createElement('div');
+    empty.className='file-browser__message';
+    empty.textContent='Empty folder';
+    children.append(empty);
+   }
+  }else{
+   setTimeout(()=>loadFileBrowserChildren(root,state,host,c,path,false),0);
+  }
+  wrapper.append(children);
+ }
+ if(state.errors.has(path) && !isDirectory){
+  const error=document.createElement('div');
+  error.className='file-browser__message file-browser__error';
+  error.textContent=state.errors.get(path);
+  wrapper.append(error);
+ }
+ return wrapper;
+}
+function renderFileBrowserInto(root,state,host,c){
+ clearNode(root);
+ const customView=c.customView||{};
+ const toolbar=document.createElement('div');
+ toolbar.className='file-browser__toolbar';
+ const label=document.createElement('div');
+ label.className='file-browser__root-label';
+ label.textContent=customView.rootLabel || c.displayName || c.componentId || 'File Browser';
+ const refresh=document.createElement('button');
+ refresh.type='button';
+ refresh.textContent='Refresh';
+ refresh.onclick=()=>{
+  state.children.clear();
+  state.errors.clear();
+  loadFileBrowserChildren(root,state,host,c,'',true);
+ };
+ toolbar.append(label,refresh);
+ root.append(toolbar);
+ const tree=document.createElement('div');
+ tree.className='file-browser__tree';
+ root.append(tree);
+ if(customView.targetFolderConfigured===false){
+  const message=document.createElement('div');
+  message.className='file-browser__message file-browser__error';
+  message.textContent='TargetFolder is not configured.';
+  tree.append(message);
+  return;
+ }
+ if(customView.targetFolderExists===false){
+  const message=document.createElement('div');
+  message.className='file-browser__message file-browser__error';
+  message.textContent='TargetFolder does not exist.';
+  tree.append(message);
+  return;
+ }
+ if(state.loading.has('')){
+  const message=document.createElement('div');
+  message.className='file-browser__message';
+  message.textContent='Loading...';
+  tree.append(message);
+  return;
+ }
+ if(state.errors.has('')){
+  const message=document.createElement('div');
+  message.className='file-browser__message file-browser__error';
+  message.textContent=state.errors.get('');
+  tree.append(message);
+  return;
+ }
+ const entries=state.children.get('');
+ if(!entries){
+  loadFileBrowserChildren(root,state,host,c,'',false);
+  return;
+ }
+ if(!entries.length){
+  const empty=document.createElement('div');
+  empty.className='file-browser__message';
+  empty.textContent='Empty folder';
+  tree.append(empty);
+  return;
+ }
+ for(const entry of entries){tree.append(renderFileBrowserEntry(root,state,host,c,entry));}
+}
+function renderFileBrowser(host,c){
+ const root=document.createElement('div');
+ root.className='file-browser';
+ const state=getFileBrowserState(host,c);
+ state.rootElement=root;
+ renderFileBrowserInto(root,state,host,c);
+ return root;
+}
+)HTML");
 		Html += TEXT(R"HTML(
 function renderButtonRow(host,ownerType,componentId,buttons){
  const buttonRow=document.createElement('div');
@@ -1964,6 +2218,9 @@ function renderComponent(host,c){
  const sectionId=`component::${String(c.componentId || '')}`;
  const title=c.displayName || c.name || c.componentId || 'Component';
  return renderCollapsibleSection(host.webUIId,sectionId,title,c.expanded!==false,body=>{
+  if(c.customView && c.customView.type==='fileBrowser'){
+   body.append(renderFileBrowser(host,c));
+  }
   if((c.properties||[]).length){
    body.append(renderProperties(host,'component',c.componentId,c.properties));
   }
@@ -2752,6 +3009,8 @@ bool UWebUIRuntimeSubsystem::StartServer(int32 Port)
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/webui")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleWebUI)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/schema")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleSchema)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/image")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleImage)));
+	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/file-browser/list")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleFileBrowserList)));
+	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/file-browser/select")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleFileBrowserSelect)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/property")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleProperty)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/action")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleAction)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/button")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleButton)));
@@ -2889,6 +3148,117 @@ bool UWebUIRuntimeSubsystem::HandleImage(const FHttpServerRequest& Request, cons
 
 	AddNoCacheHeaders(*Response);
 	OnComplete(MoveTemp(Response));
+	return true;
+}
+
+bool UWebUIRuntimeSubsystem::HandleFileBrowserList(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
+{
+	const FString WebUIId = Request.QueryParams.FindRef(TEXT("webuiId"));
+	const FString ComponentId = Request.QueryParams.FindRef(TEXT("componentId"));
+	const FString RelativePath = Request.QueryParams.FindRef(TEXT("relativePath"));
+
+	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+	if (WebUIId.IsEmpty() || ComponentId.IsEmpty())
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("Missing file browser query parameters"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	UWebUIFileBrowserComponent* FileBrowserComponent = FindFileBrowserComponent(WebUIId, ComponentId);
+	if (!FileBrowserComponent)
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("File browser component not found"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	TArray<FWebUIFileBrowserEntry> Entries;
+	bool bTruncated = false;
+	FString NormalizedRelativePath;
+	FString Error;
+	if (!FileBrowserComponent->ListDirectoryForWebUI(RelativePath, Entries, bTruncated, NormalizedRelativePath, Error))
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), Error.IsEmpty() ? TEXT("Failed to list directory") : Error);
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	TArray<TSharedPtr<FJsonValue>> EntryValues;
+	EntryValues.Reserve(Entries.Num());
+	for (const FWebUIFileBrowserEntry& Entry : Entries)
+	{
+		EntryValues.Add(MakeShared<FJsonValueObject>(Entry.ToJsonObject()));
+	}
+
+	Response->SetBoolField(TEXT("ok"), true);
+	Response->SetStringField(TEXT("webUIId"), WebUIId);
+	Response->SetStringField(TEXT("componentId"), ComponentId);
+	Response->SetStringField(TEXT("relativePath"), NormalizedRelativePath);
+	Response->SetStringField(TEXT("selectedRelativePath"), FileBrowserComponent->GetSelectedRelativePath());
+	Response->SetBoolField(TEXT("truncated"), bTruncated);
+	Response->SetArrayField(TEXT("entries"), EntryValues);
+	OnComplete(MakeJsonResponse(Response));
+	return true;
+}
+
+bool UWebUIRuntimeSubsystem::HandleFileBrowserSelect(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
+{
+	FString Error;
+	TSharedPtr<FJsonObject> Body = ParseRequestJson(Request, Error);
+	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+	if (!Body.IsValid())
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), Error.IsEmpty() ? TEXT("Invalid request body") : Error);
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	FString WebUIId;
+	if (!Body->TryGetStringField(TEXT("webUIId"), WebUIId))
+	{
+		Body->TryGetStringField(TEXT("webuiId"), WebUIId);
+	}
+	FString ComponentId;
+	Body->TryGetStringField(TEXT("componentId"), ComponentId);
+	FString RelativePath;
+	Body->TryGetStringField(TEXT("relativePath"), RelativePath);
+
+	if (WebUIId.IsEmpty() || ComponentId.IsEmpty() || RelativePath.IsEmpty())
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("Missing file browser selection parameters"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	UWebUIFileBrowserComponent* FileBrowserComponent = FindFileBrowserComponent(WebUIId, ComponentId);
+	if (!FileBrowserComponent)
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("File browser component not found"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	FString SelectedAbsolutePath;
+	FString SelectedRelativePath;
+	if (!FileBrowserComponent->SelectFileFromWebUI(RelativePath, SelectedAbsolutePath, SelectedRelativePath, Error))
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), Error.IsEmpty() ? TEXT("Failed to select file") : Error);
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	Response->SetBoolField(TEXT("ok"), true);
+	Response->SetStringField(TEXT("selectedRelativePath"), SelectedRelativePath);
+	Response->SetStringField(TEXT("selectedFileName"), FPaths::GetCleanFilename(SelectedAbsolutePath));
+	OnComplete(MakeJsonResponse(Response));
 	return true;
 }
 
@@ -3176,10 +3546,10 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 
 		if (const UWebUIImageComponent* ImageComponent = Cast<UWebUIImageComponent>(Component))
 		{
-			if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(Host->GetWebUIId(), ImageComponent, bUseWebSocketStreaming))
-			{
-				HostImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
-				}
+		if (TSharedPtr<FJsonObject> ImageObject = MakeImageObject(Host->GetWebUIId(), ImageComponent, bUseWebSocketStreaming))
+		{
+			HostImageValues.Add(MakeShared<FJsonValueObject>(ImageObject.ToSharedRef()));
+		}
 
 				if (ImageComponent->WebUIImageSlot != EWebUIImageSlot::Inline)
 				{
@@ -3326,7 +3696,13 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		}
 	}
 
-	if (PropertyValues.IsEmpty() && ButtonValues.IsEmpty() && ImageValues.IsEmpty())
+	TSharedPtr<FJsonObject> CustomView;
+	if (const UWebUIFileBrowserComponent* FileBrowserComponent = Cast<UWebUIFileBrowserComponent>(Component))
+	{
+		CustomView = FileBrowserComponent->BuildWebUICustomView(WebUIId);
+	}
+
+	if (PropertyValues.IsEmpty() && ButtonValues.IsEmpty() && ImageValues.IsEmpty() && !CustomView.IsValid())
 	{
 		return nullptr;
 	}
@@ -3342,6 +3718,10 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 	ComponentObject->SetArrayField(TEXT("properties"), PropertyValues);
 	ComponentObject->SetArrayField(TEXT("buttons"), ButtonValues);
 	ComponentObject->SetArrayField(TEXT("images"), ImageValues);
+	if (CustomView.IsValid())
+	{
+		ComponentObject->SetObjectField(TEXT("customView"), CustomView);
+	}
 	return ComponentObject;
 }
 
@@ -3393,6 +3773,11 @@ UActorComponent* UWebUIRuntimeSubsystem::FindComponent(const FString& WebUIId, c
 		}
 	}
 	return nullptr;
+}
+
+UWebUIFileBrowserComponent* UWebUIRuntimeSubsystem::FindFileBrowserComponent(const FString& WebUIId, const FString& ComponentId) const
+{
+	return Cast<UWebUIFileBrowserComponent>(FindComponent(WebUIId, ComponentId));
 }
 
 bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange)

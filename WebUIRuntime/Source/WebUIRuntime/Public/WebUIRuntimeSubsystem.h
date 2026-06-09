@@ -13,6 +13,7 @@ class AActor;
 class APawn;
 class UActorComponent;
 class UWebUIHostComponent;
+class UWebUIFileBrowserComponent;
 class UWebUIImageComponent;
 class UTexture;
 struct FHttpServerRequest;
@@ -64,6 +65,8 @@ private:
 	bool HandleWebUI(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleSchema(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleImage(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
+	bool HandleFileBrowserList(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
+	bool HandleFileBrowserSelect(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleProperty(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleButton(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
 	bool HandleAction(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<struct FHttpServerResponse>&&)>& OnComplete);
@@ -73,6 +76,7 @@ private:
 	TSharedPtr<FJsonObject> BuildComponentSchema(UActorComponent* Component, const FString& WebUIId) const;
 	UObject* FindPropertyOwner(const FString& WebUIId, const FString& OwnerType, const FString& ComponentId, UWebUIHostComponent*& OutHost) const;
 	UActorComponent* FindComponent(const FString& WebUIId, const FString& ComponentId) const;
+	UWebUIFileBrowserComponent* FindFileBrowserComponent(const FString& WebUIId, const FString& ComponentId) const;
 	FString BuildImageUrl(const FString& WebUIId, const FString& ComponentId) const;
 	TUniquePtr<struct FHttpServerResponse> MakeImageResponse(const UWebUIImageComponent* ImageComponent, FString& OutError) const;
 	bool TryGetTexturePixels(UTexture* Texture, bool bForceOpaqueRenderTargetImage, TArray<FColor>& OutPixels, int32& OutWidth, int32& OutHeight, FString& OutError) const;
