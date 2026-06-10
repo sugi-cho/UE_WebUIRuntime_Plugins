@@ -11,6 +11,7 @@
 #include "HAL/ThreadSafeCounter.h"
 #include "ImageUtils.h"
 #include "Misc/PackageName.h"
+#include "Misc/Paths.h"
 #include "Misc/Base64.h"
 #include "HttpPath.h"
 #include "HttpServerModule.h"
@@ -895,6 +896,8 @@ button{cursor:pointer;background:var(--button-bg)}
 .file-browser{display:flex;flex-direction:column;gap:8px;margin:10px 0;min-width:0}
 .file-browser__toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border:1px solid var(--border-subtle);border-radius:8px;background:rgba(255,255,255,.03);min-width:0}
 .file-browser__root-label{font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-browser__toolbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.file-browser__folder-button{white-space:nowrap}
 .file-browser__tree{display:flex;flex-direction:column;gap:2px;min-width:0}
 .file-browser__children{display:flex;flex-direction:column;gap:2px;margin-left:18px;border-left:1px solid var(--border-subtle);padding-left:8px;min-width:0}
 .file-browser__row{display:flex;align-items:center;gap:6px;width:100%;padding:6px 8px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text);text-align:left;min-width:0}
@@ -1958,7 +1961,7 @@ function getFileBrowserState(host,c){
  const key=getFileBrowserKey(host,c);
  let state=fileBrowserStates.get(key);
  if(!state){
-  state={children:new Map(),expanded:new Set(),loading:new Set(),errors:new Map(),selectedRelativePath:null,pendingSelection:null,rootElement:null};
+  state={children:new Map(),expanded:new Set(),loading:new Set(),errors:new Map(),selectedRelativePath:null,pendingSelection:null,folderDialogPending:false,rootElement:null};
   fileBrowserStates.set(key,state);
  }
  const customView=c.customView||{};
@@ -1989,6 +1992,43 @@ async function postFileBrowserSelect(host,c,relativePath){
  const payload=await response.json();
  if(!payload.ok){throw new Error(payload.error || 'Failed to select file.');}
  return payload;
+}
+async function postFileBrowserOpenFolderDialog(host,c){
+ const customView=c.customView||{};
+ const response=await fetch(customView.openFolderDialogEndpoint || '/api/webui/file-browser/open-folder-dialog',{
+  method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({webUIId:host.webUIId || '',componentId:c.componentId || ''})
+ });
+ const payload=await response.json();
+ if(!payload.ok && !(payload.cancelled || payload.errorCode==='FolderSelectionCancelled')){
+  throw new Error(payload.error || 'Failed to select folder.');
+ }
+ return payload;
+}
+async function openFileBrowserFolderDialog(root,state,host,c){
+ state.folderDialogPending=true;
+ state.errors.delete('');
+ renderFileBrowserInto(root,state,host,c);
+ try{
+  const payload=await postFileBrowserOpenFolderDialog(host,c);
+  if(payload.ok){
+   const customView=c.customView||{};
+   if(payload.rootLabel){customView.rootLabel=payload.rootLabel;}
+   customView.targetFolderConfigured=payload.targetFolderConfigured!==false;
+   customView.targetFolderExists=payload.targetFolderExists!==false;
+   state.children.clear();
+   state.expanded.clear();
+   state.errors.clear();
+   state.selectedRelativePath=payload.selectedRelativePath || null;
+   await loadFileBrowserChildren(root,state,host,c,'',true);
+  }
+ }catch(error){
+  state.errors.set('',error && error.message ? error.message : String(error));
+ }finally{
+  state.folderDialogPending=false;
+  renderFileBrowserInto(root,state,host,c);
+ }
 }
 function clearNode(node){while(node.firstChild){node.removeChild(node.firstChild);}}
 function fileBrowserFormatSize(size){
@@ -2122,15 +2162,28 @@ function renderFileBrowserInto(root,state,host,c){
  const label=document.createElement('div');
  label.className='file-browser__root-label';
  label.textContent=customView.rootLabel || c.displayName || c.componentId || 'File Browser';
+ const actions=document.createElement('div');
+ actions.className='file-browser__toolbar-actions';
+ if(customView.allowFolderSelection || customView.allowFolderDialog){
+  const selectFolder=document.createElement('button');
+  selectFolder.type='button';
+  selectFolder.className='file-browser__folder-button';
+  selectFolder.textContent=state.folderDialogPending ? 'Selecting...' : 'Select Folder';
+  selectFolder.disabled=state.folderDialogPending;
+  selectFolder.onclick=()=>openFileBrowserFolderDialog(root,state,host,c);
+  actions.append(selectFolder);
+ }
  const refresh=document.createElement('button');
  refresh.type='button';
  refresh.textContent='Refresh';
+ refresh.disabled=state.folderDialogPending;
  refresh.onclick=()=>{
   state.children.clear();
   state.errors.clear();
   loadFileBrowserChildren(root,state,host,c,'',true);
  };
- toolbar.append(label,refresh);
+ actions.append(refresh);
+ toolbar.append(label,actions);
  root.append(toolbar);
  const tree=document.createElement('div');
  tree.className='file-browser__tree';
@@ -3011,6 +3064,7 @@ bool UWebUIRuntimeSubsystem::StartServer(int32 Port)
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/image")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleImage)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/file-browser/list")), EHttpServerRequestVerbs::VERB_GET, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleFileBrowserList)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/file-browser/select")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleFileBrowserSelect)));
+	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/file-browser/open-folder-dialog")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleFileBrowserOpenFolderDialog)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/property")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleProperty)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/action")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleAction)));
 	RouteHandles.Add(Router->BindRoute(FHttpPath(TEXT("/api/webui/button")), EHttpServerRequestVerbs::VERB_POST, FHttpRequestHandler::CreateUObject(this, &UWebUIRuntimeSubsystem::HandleButton)));
@@ -3301,6 +3355,68 @@ void UWebUIRuntimeSubsystem::NotifyWebUIComponentStateChanged(UActorComponent* C
 
 	++SchemaRevision;
 	WebSocketServer->SendSchemaChanged(WebUIId);
+}
+
+
+bool UWebUIRuntimeSubsystem::HandleFileBrowserOpenFolderDialog(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)
+{
+	FString Error;
+	TSharedPtr<FJsonObject> Body = ParseRequestJson(Request, Error);
+	TSharedRef<FJsonObject> Response = MakeShared<FJsonObject>();
+	if (!Body.IsValid())
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), Error.IsEmpty() ? TEXT("Invalid request body") : Error);
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	FString WebUIId;
+	if (!Body->TryGetStringField(TEXT("webUIId"), WebUIId))
+	{
+		Body->TryGetStringField(TEXT("webuiId"), WebUIId);
+	}
+	FString ComponentId;
+	Body->TryGetStringField(TEXT("componentId"), ComponentId);
+
+	if (WebUIId.IsEmpty() || ComponentId.IsEmpty())
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("Missing file browser folder dialog parameters"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	UWebUIFileBrowserComponent* FileBrowserComponent = FindFileBrowserComponent(WebUIId, ComponentId);
+	if (!FileBrowserComponent)
+	{
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetStringField(TEXT("error"), TEXT("File browser component not found"));
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	FString SelectedFolder;
+	if (!FileBrowserComponent->OpenFolderDialogFromWebUI(SelectedFolder, Error))
+	{
+		const bool bCancelled = Error.Contains(TEXT("cancel"), ESearchCase::IgnoreCase);
+		Response->SetBoolField(TEXT("ok"), false);
+		Response->SetBoolField(TEXT("cancelled"), bCancelled);
+		Response->SetStringField(TEXT("errorCode"), bCancelled ? TEXT("FolderSelectionCancelled") : TEXT("FolderSelectionFailed"));
+		Response->SetStringField(TEXT("error"), Error.IsEmpty() ? TEXT("Failed to select folder") : Error);
+		OnComplete(MakeJsonResponse(Response));
+		return true;
+	}
+
+	Response->SetBoolField(TEXT("ok"), true);
+	Response->SetStringField(TEXT("componentId"), ComponentId);
+	Response->SetStringField(TEXT("rootLabel"), FileBrowserComponent->GetRootLabelForWebUI());
+	Response->SetStringField(TEXT("selectedFolderName"), FPaths::GetCleanFilename(SelectedFolder));
+	Response->SetStringField(TEXT("selectedRelativePath"), FileBrowserComponent->GetSelectedRelativePath());
+	Response->SetBoolField(TEXT("targetFolderConfigured"), !FileBrowserComponent->GetResolvedRootPath().IsEmpty());
+	Response->SetBoolField(TEXT("targetFolderExists"), FPaths::DirectoryExists(FileBrowserComponent->GetResolvedRootPath()));
+	OnComplete(MakeJsonResponse(Response));
+	return true;
 }
 
 bool UWebUIRuntimeSubsystem::HandleProperty(const FHttpServerRequest& Request, const TFunction<void(TUniquePtr<FHttpServerResponse>&&)>& OnComplete)

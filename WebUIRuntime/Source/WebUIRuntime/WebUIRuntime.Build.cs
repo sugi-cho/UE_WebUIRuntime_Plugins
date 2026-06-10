@@ -43,7 +43,8 @@ public class WebUIRuntime : ModuleRules
 				new string[]
 				{
 					"UnrealEd",
-					"BlueprintGraph"
+					"BlueprintGraph",
+					"DesktopPlatform"
 				}
 			);
 		}

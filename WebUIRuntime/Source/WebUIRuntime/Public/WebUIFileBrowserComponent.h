@@ -15,6 +15,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	RelativePath
 );
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnWebUIFolderSelected,
+	const FString&,
+	FolderPath
+);
+
 struct FWebUIFileBrowserEntry
 {
 	FString Id;
@@ -49,11 +55,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category="WebUI File Browser")
 	bool ClearSelection();
 
+	UFUNCTION(BlueprintCallable, Category="WebUI File Browser")
+	bool OpenFolderDialogFromWebUI(FString& OutSelectedFolder, FString& OutError);
+
 	UFUNCTION(BlueprintPure, Category="WebUI File Browser")
 	FString GetResolvedRootPath() const;
 
 	UFUNCTION(BlueprintPure, Category="WebUI File Browser")
 	FString GetSelectedFilePath() const { return SelectedFilePath; }
+
+	UFUNCTION(BlueprintPure, Category="WebUI File Browser")
+	FString GetRootLabelForWebUI() const;
 
 	UFUNCTION(BlueprintPure, Category="WebUI File Browser")
 	FString GetSelectedRelativePath() const { return SelectedRelativePath; }
@@ -83,6 +95,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser")
 	FString RootLabel;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser|Folder Selection")
+	bool bAllowWebUIFolderSelection = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser|Folder Selection")
+	FString FolderDialogTitle = TEXT("Select Folder");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser|Folder Selection", meta=(RelativeToGameDir))
+	FDirectoryPath FolderDialogInitialPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser|Folder Selection")
+	bool bClearSelectionWhenFolderChanged = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI File Browser")
 	bool bLazyLoadSubFolders = true;
 
@@ -104,9 +128,15 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="WebUI File Browser")
 	FOnWebUIFileSelected OnFileSelected;
 
+	UPROPERTY(BlueprintAssignable, Category="WebUI File Browser")
+	FOnWebUIFolderSelected OnFolderSelected;
+
 protected:
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI File Browser", DisplayName="OnFileSelected")
 	void K2_OnFileSelected(const FString& FilePath, const FString& RelativePath);
+
+	UFUNCTION(BlueprintImplementableEvent, Category="WebUI File Browser", DisplayName="OnFolderSelected")
+	void K2_OnFolderSelected(const FString& FolderPath);
 
 private:
 	bool TryResolveRelativePathInternal(

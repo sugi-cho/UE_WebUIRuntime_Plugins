@@ -5,6 +5,12 @@
 #include "Misc/Paths.h"
 #include "WebUIRuntimeSubsystem.h"
 
+#if WITH_EDITOR
+#include "DesktopPlatformModule.h"
+#include "Framework/Application/SlateApplication.h"
+#include "IDesktopPlatform.h"
+#endif
+
 namespace
 {
 	FString NormalizePathForCompare(FString Path)
@@ -157,6 +163,119 @@ bool UWebUIFileBrowserComponent::ClearSelection()
 	SelectedRelativePath.Reset();
 	NotifyFileBrowserStateChanged();
 	return true;
+}
+
+
+bool UWebUIFileBrowserComponent::OpenFolderDialogFromWebUI(FString& OutSelectedFolder, FString& OutError)
+{
+	OutSelectedFolder.Reset();
+	OutError.Reset();
+
+	if (!bAllowWebUIFolderSelection)
+	{
+		OutError = TEXT("Folder selection from WebUI is disabled.");
+		return false;
+	}
+
+#if WITH_EDITOR
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		OutError = TEXT("DesktopPlatform is not available.");
+		return false;
+	}
+
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	}
+
+	FString DefaultPath = FolderDialogInitialPath.Path;
+	DefaultPath.TrimStartAndEndInline();
+	DefaultPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+	if (DefaultPath.IsEmpty())
+	{
+		DefaultPath = GetResolvedRootPath();
+	}
+	if (DefaultPath.IsEmpty())
+	{
+		DefaultPath = FPaths::ProjectDir();
+	}
+
+	if (DefaultPath.Equals(TEXT("/Game"), ESearchCase::IgnoreCase))
+	{
+		DefaultPath = FPaths::ProjectContentDir();
+	}
+	else if (DefaultPath.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+	{
+		DefaultPath = FPaths::Combine(FPaths::ProjectContentDir(), DefaultPath.RightChop(6));
+	}
+	else if (FPaths::IsRelative(DefaultPath))
+	{
+		DefaultPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), DefaultPath);
+	}
+
+	DefaultPath = NormalizePathForCompare(DefaultPath);
+	if (!FPaths::DirectoryExists(DefaultPath))
+	{
+		DefaultPath = NormalizePathForCompare(FPaths::ProjectDir());
+	}
+
+	FString SelectedFolder;
+	const bool bSelected = DesktopPlatform->OpenDirectoryDialog(
+		ParentWindowHandle,
+		FolderDialogTitle.IsEmpty() ? TEXT("Select Folder") : FolderDialogTitle,
+		DefaultPath,
+		SelectedFolder
+	);
+
+	if (!bSelected)
+	{
+		OutError = TEXT("Folder selection was cancelled.");
+		return false;
+	}
+
+	SelectedFolder = NormalizePathForCompare(SelectedFolder);
+	if (SelectedFolder.IsEmpty() || !FPaths::DirectoryExists(SelectedFolder))
+	{
+		OutError = TEXT("Selected folder does not exist.");
+		return false;
+	}
+
+	TargetFolder.Path = SelectedFolder;
+	if (bClearSelectionWhenFolderChanged)
+	{
+		SelectedFilePath.Reset();
+		SelectedRelativePath.Reset();
+	}
+
+	OutSelectedFolder = SelectedFolder;
+	OnFolderSelected.Broadcast(SelectedFolder);
+	K2_OnFolderSelected(SelectedFolder);
+	NotifyFileBrowserStateChanged();
+	return true;
+#else
+	OutError = TEXT("Folder dialog is only available in editor builds.");
+	return false;
+#endif
+}
+
+FString UWebUIFileBrowserComponent::GetRootLabelForWebUI() const
+{
+	if (!RootLabel.IsEmpty())
+	{
+		return RootLabel;
+	}
+
+	const FString RootPath = GetResolvedRootPath();
+	if (!RootPath.IsEmpty())
+	{
+		return FPaths::GetCleanFilename(RootPath);
+	}
+
+	return GetWebUIDisplayName();
 }
 
 FString UWebUIFileBrowserComponent::GetResolvedRootPath() const
@@ -456,8 +575,10 @@ TSharedRef<FJsonObject> UWebUIFileBrowserComponent::BuildWebUICustomView(const F
 	TSharedRef<FJsonObject> CustomView = MakeShared<FJsonObject>();
 	CustomView->SetStringField(TEXT("type"), TEXT("fileBrowser"));
 	CustomView->SetStringField(TEXT("webUIId"), WebUIId);
-	CustomView->SetStringField(TEXT("rootLabel"), RootLabel.IsEmpty() ? GetWebUIDisplayName() : RootLabel);
+	CustomView->SetStringField(TEXT("rootLabel"), GetRootLabelForWebUI());
 	CustomView->SetStringField(TEXT("rootRelativePath"), FString());
+	CustomView->SetBoolField(TEXT("allowFolderSelection"), bAllowWebUIFolderSelection);
+	CustomView->SetStringField(TEXT("openFolderDialogEndpoint"), TEXT("/api/webui/file-browser/open-folder-dialog"));
 	CustomView->SetStringField(TEXT("selectedRelativePath"), SelectedRelativePath);
 	CustomView->SetBoolField(TEXT("supportsLazyLoad"), bLazyLoadSubFolders);
 	CustomView->SetBoolField(TEXT("foldersFirst"), bFoldersFirst);
