@@ -1,14 +1,20 @@
 #include "WebUIFileBrowserComponent.h"
 
+#include "GameFramework/Actor.h"
 #include "HAL/FileManager.h"
 #include "Json.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
+#include "WebUIHostComponent.h"
 #include "WebUIRuntimeSubsystem.h"
 
-#if WITH_EDITOR
-#include "DesktopPlatformModule.h"
-#include "Framework/Application/SlateApplication.h"
-#include "IDesktopPlatform.h"
+#if PLATFORM_WINDOWS
+#include <thread>
+#include "Windows/AllowWindowsPlatformTypes.h"
+#include "Windows/PreWindowsApi.h"
+#include <ShObjIdl.h>
+#include "Windows/PostWindowsApi.h"
+#include "Windows/HideWindowsPlatformTypes.h"
 #endif
 
 namespace
@@ -95,6 +101,174 @@ namespace
 		}
 		Object->SetArrayField(FieldName, JsonValues);
 	}
+
+	FString SanitizeConfigSegment(FString Segment)
+	{
+		Segment.TrimStartAndEndInline();
+		Segment.ReplaceInline(TEXT("["), TEXT("_"));
+		Segment.ReplaceInline(TEXT("]"), TEXT("_"));
+		Segment.ReplaceInline(TEXT("\r"), TEXT("_"));
+		Segment.ReplaceInline(TEXT("\n"), TEXT("_"));
+		return Segment.IsEmpty() ? TEXT("Default") : Segment;
+	}
+
+	FString ResolveFileBrowserDirectoryPath(FString Path, const FString& FallbackPath)
+	{
+		Path.TrimStartAndEndInline();
+		Path.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+		if (Path.IsEmpty())
+		{
+			Path = FallbackPath;
+		}
+
+		if (Path.IsEmpty())
+		{
+			Path = FPaths::ProjectDir();
+		}
+
+		if (Path.Equals(TEXT("/Game"), ESearchCase::IgnoreCase))
+		{
+			Path = FPaths::ProjectContentDir();
+		}
+		else if (Path.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
+		{
+			Path = FPaths::Combine(FPaths::ProjectContentDir(), Path.RightChop(6));
+		}
+		else if (FPaths::IsRelative(Path))
+		{
+			Path = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), Path);
+		}
+
+		return NormalizePathForCompare(Path);
+	}
+
+#if PLATFORM_WINDOWS
+	FString MakeWindowsDialogError(const TCHAR* Context, HRESULT Result)
+	{
+		return FString::Printf(TEXT("%s failed. HRESULT=0x%08x"), Context, static_cast<uint32>(Result));
+	}
+
+	bool OpenWindowsFolderPicker(const FString& Title, const FString& DefaultPath, FString& OutSelectedFolder, FString& OutError)
+	{
+		OutSelectedFolder.Reset();
+		OutError.Reset();
+
+		bool bSelected = false;
+		FString ThreadSelectedFolder;
+		FString ThreadError;
+
+		std::thread DialogThread([Title, DefaultPath, &bSelected, &ThreadSelectedFolder, &ThreadError]()
+		{
+			HRESULT CoInitResult = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+			const bool bDidInitializeCom = SUCCEEDED(CoInitResult);
+			if (FAILED(CoInitResult))
+			{
+				ThreadError = MakeWindowsDialogError(TEXT("CoInitializeEx"), CoInitResult);
+				return;
+			}
+
+			IFileOpenDialog* Dialog = nullptr;
+			HRESULT Result = ::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&Dialog));
+			if (FAILED(Result) || !Dialog)
+			{
+				ThreadError = MakeWindowsDialogError(TEXT("CoCreateInstance(CLSID_FileOpenDialog)"), Result);
+				if (bDidInitializeCom)
+				{
+					::CoUninitialize();
+				}
+				return;
+			}
+
+			DWORD Options = 0;
+			if (SUCCEEDED(Dialog->GetOptions(&Options)))
+			{
+				Dialog->SetOptions(Options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR);
+			}
+
+			const FString DialogTitle = Title.IsEmpty() ? TEXT("Select Folder") : Title;
+			Dialog->SetTitle(*DialogTitle);
+
+			if (!DefaultPath.IsEmpty() && FPaths::DirectoryExists(DefaultPath))
+			{
+				IShellItem* DefaultFolderItem = nullptr;
+				if (SUCCEEDED(::SHCreateItemFromParsingName(*DefaultPath, nullptr, IID_PPV_ARGS(&DefaultFolderItem))) && DefaultFolderItem)
+				{
+					Dialog->SetFolder(DefaultFolderItem);
+					DefaultFolderItem->Release();
+				}
+			}
+
+			Result = Dialog->Show(nullptr);
+			if (Result == HRESULT_FROM_WIN32(ERROR_CANCELLED))
+			{
+				ThreadError = TEXT("Folder selection was cancelled.");
+				Dialog->Release();
+				if (bDidInitializeCom)
+				{
+					::CoUninitialize();
+				}
+				return;
+			}
+
+			if (FAILED(Result))
+			{
+				ThreadError = MakeWindowsDialogError(TEXT("IFileOpenDialog::Show"), Result);
+				Dialog->Release();
+				if (bDidInitializeCom)
+				{
+					::CoUninitialize();
+				}
+				return;
+			}
+
+			IShellItem* SelectedItem = nullptr;
+			Result = Dialog->GetResult(&SelectedItem);
+			if (FAILED(Result) || !SelectedItem)
+			{
+				ThreadError = MakeWindowsDialogError(TEXT("IFileOpenDialog::GetResult"), Result);
+				Dialog->Release();
+				if (bDidInitializeCom)
+				{
+					::CoUninitialize();
+				}
+				return;
+			}
+
+			PWSTR SelectedPath = nullptr;
+			Result = SelectedItem->GetDisplayName(SIGDN_FILESYSPATH, &SelectedPath);
+			if (FAILED(Result) || !SelectedPath)
+			{
+				ThreadError = MakeWindowsDialogError(TEXT("IShellItem::GetDisplayName"), Result);
+				SelectedItem->Release();
+				Dialog->Release();
+				if (bDidInitializeCom)
+				{
+					::CoUninitialize();
+				}
+				return;
+			}
+
+			ThreadSelectedFolder = FString(SelectedPath);
+			::CoTaskMemFree(SelectedPath);
+			SelectedItem->Release();
+			Dialog->Release();
+
+			bSelected = true;
+			if (bDidInitializeCom)
+			{
+				::CoUninitialize();
+			}
+		});
+
+		DialogThread.join();
+
+		OutSelectedFolder = ThreadSelectedFolder;
+		OutError = ThreadError;
+		return bSelected;
+	}
+#endif
+
 }
 
 TSharedRef<FJsonObject> FWebUIFileBrowserEntry::ToJsonObject() const
@@ -126,6 +300,12 @@ UWebUIFileBrowserComponent::UWebUIFileBrowserComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetWebUIDisplayName(TEXT("File Browser"));
+}
+
+void UWebUIFileBrowserComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	LoadPersistedFolderIfEnabled();
 }
 
 void UWebUIFileBrowserComponent::RefreshFileBrowser()
@@ -177,63 +357,16 @@ bool UWebUIFileBrowserComponent::OpenFolderDialogFromWebUI(FString& OutSelectedF
 		return false;
 	}
 
-#if WITH_EDITOR
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (!DesktopPlatform)
-	{
-		OutError = TEXT("DesktopPlatform is not available.");
-		return false;
-	}
-
-	const void* ParentWindowHandle = nullptr;
-	if (FSlateApplication::IsInitialized())
-	{
-		ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-	}
-
-	FString DefaultPath = FolderDialogInitialPath.Path;
-	DefaultPath.TrimStartAndEndInline();
-	DefaultPath.ReplaceInline(TEXT("\\"), TEXT("/"));
-
-	if (DefaultPath.IsEmpty())
-	{
-		DefaultPath = GetResolvedRootPath();
-	}
-	if (DefaultPath.IsEmpty())
-	{
-		DefaultPath = FPaths::ProjectDir();
-	}
-
-	if (DefaultPath.Equals(TEXT("/Game"), ESearchCase::IgnoreCase))
-	{
-		DefaultPath = FPaths::ProjectContentDir();
-	}
-	else if (DefaultPath.StartsWith(TEXT("/Game/"), ESearchCase::IgnoreCase))
-	{
-		DefaultPath = FPaths::Combine(FPaths::ProjectContentDir(), DefaultPath.RightChop(6));
-	}
-	else if (FPaths::IsRelative(DefaultPath))
-	{
-		DefaultPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir(), DefaultPath);
-	}
-
-	DefaultPath = NormalizePathForCompare(DefaultPath);
+#if PLATFORM_WINDOWS
+	FString DefaultPath = ResolveFileBrowserDirectoryPath(FolderDialogInitialPath.Path, GetResolvedRootPath());
 	if (!FPaths::DirectoryExists(DefaultPath))
 	{
 		DefaultPath = NormalizePathForCompare(FPaths::ProjectDir());
 	}
 
 	FString SelectedFolder;
-	const bool bSelected = DesktopPlatform->OpenDirectoryDialog(
-		ParentWindowHandle,
-		FolderDialogTitle.IsEmpty() ? TEXT("Select Folder") : FolderDialogTitle,
-		DefaultPath,
-		SelectedFolder
-	);
-
-	if (!bSelected)
+	if (!OpenWindowsFolderPicker(FolderDialogTitle, DefaultPath, SelectedFolder, OutError))
 	{
-		OutError = TEXT("Folder selection was cancelled.");
 		return false;
 	}
 
@@ -255,11 +388,40 @@ bool UWebUIFileBrowserComponent::OpenFolderDialogFromWebUI(FString& OutSelectedF
 	OnFolderSelected.Broadcast(SelectedFolder);
 	K2_OnFolderSelected(SelectedFolder);
 	NotifyFileBrowserStateChanged();
+	SavePersistedFolderIfEnabled();
 	return true;
 #else
-	OutError = TEXT("Folder dialog is only available in editor builds.");
+	OutError = TEXT("Folder dialog is only available on Windows builds.");
 	return false;
 #endif
+}
+
+bool UWebUIFileBrowserComponent::SetTargetFolderFromPersistedPath(const FString& PersistedFolderPath, FString& OutError)
+{
+	OutError.Reset();
+
+	FString NormalizedFolder = ResolveFileBrowserDirectoryPath(PersistedFolderPath, FString());
+	if (NormalizedFolder.IsEmpty())
+	{
+		OutError = TEXT("Persisted folder path is empty.");
+		return false;
+	}
+
+	if (!FPaths::DirectoryExists(NormalizedFolder))
+	{
+		OutError = FString::Printf(TEXT("Persisted folder does not exist: %s"), *NormalizedFolder);
+		return false;
+	}
+
+	TargetFolder.Path = NormalizedFolder;
+	if (bClearSelectionWhenFolderChanged)
+	{
+		SelectedFilePath.Reset();
+		SelectedRelativePath.Reset();
+	}
+
+	NotifyFileBrowserStateChanged();
+	return true;
 }
 
 FString UWebUIFileBrowserComponent::GetRootLabelForWebUI() const
@@ -681,3 +843,71 @@ FString UWebUIFileBrowserComponent::NormalizeAllowedExtension(const FString& Ext
 	}
 	return Normalized;
 }
+
+bool UWebUIFileBrowserComponent::TryFindOwningWebUIHost(UWebUIHostComponent*& OutHost) const
+{
+	OutHost = nullptr;
+	AActor* Owner = GetOwner();
+	if (!IsValid(Owner))
+	{
+		return false;
+	}
+
+	TArray<UWebUIHostComponent*> Hosts;
+	Owner->GetComponents<UWebUIHostComponent>(Hosts);
+	for (UWebUIHostComponent* Host : Hosts)
+	{
+		if (IsValid(Host))
+		{
+			OutHost = Host;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+FString UWebUIFileBrowserComponent::GetFolderPersistenceSection(const UWebUIHostComponent* Host) const
+{
+	const FString HostId = IsValid(Host) ? Host->GetWebUIId() : FString();
+	return FString::Printf(TEXT("WebUIRuntime.FileBrowserFolders.%s"), *SanitizeConfigSegment(HostId));
+}
+
+void UWebUIFileBrowserComponent::SavePersistedFolderIfEnabled() const
+{
+	UWebUIHostComponent* Host = nullptr;
+	if (!TryFindOwningWebUIHost(Host) || !Host || !Host->IsAutoSaveChangedValuesEnabled())
+	{
+		return;
+	}
+
+	if (TargetFolder.Path.IsEmpty())
+	{
+		return;
+	}
+
+	if (GConfig)
+	{
+		GConfig->SetString(*GetFolderPersistenceSection(Host), *GetName(), *TargetFolder.Path, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
+}
+
+void UWebUIFileBrowserComponent::LoadPersistedFolderIfEnabled()
+{
+	UWebUIHostComponent* Host = nullptr;
+	if (!TryFindOwningWebUIHost(Host) || !Host || !Host->ShouldAutoLoadSavedValues())
+	{
+		return;
+	}
+
+	FString PersistedFolder;
+	if (!GConfig || !GConfig->GetString(*GetFolderPersistenceSection(Host), *GetName(), PersistedFolder, GGameUserSettingsIni))
+	{
+		return;
+	}
+
+	FString Error;
+	SetTargetFolderFromPersistedPath(PersistedFolder, Error);
+}
+

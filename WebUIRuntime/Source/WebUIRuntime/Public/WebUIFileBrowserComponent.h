@@ -46,6 +46,8 @@ class WEBUIRUNTIME_API UWebUIFileBrowserComponent : public UWebUIComponentBase
 public:
 	UWebUIFileBrowserComponent();
 
+	virtual void BeginPlay() override;
+
 	UFUNCTION(BlueprintCallable, Category="WebUI File Browser")
 	void RefreshFileBrowser();
 
@@ -57,6 +59,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category="WebUI File Browser")
 	bool OpenFolderDialogFromWebUI(FString& OutSelectedFolder, FString& OutError);
+
+	UFUNCTION(BlueprintCallable, Category="WebUI File Browser")
+	bool SetTargetFolderFromPersistedPath(const FString& PersistedFolderPath, FString& OutError);
 
 	UFUNCTION(BlueprintPure, Category="WebUI File Browser")
 	FString GetResolvedRootPath() const;
@@ -151,6 +156,10 @@ private:
 	bool DirectoryHasDisplayableChildren(const FString& AbsoluteDirectory, int32 Depth) const;
 	void NotifyFileBrowserStateChanged();
 	FString NormalizeAllowedExtension(const FString& Extension) const;
+	bool TryFindOwningWebUIHost(class UWebUIHostComponent*& OutHost) const;
+	void SavePersistedFolderIfEnabled() const;
+	void LoadPersistedFolderIfEnabled();
+	FString GetFolderPersistenceSection(const class UWebUIHostComponent* Host) const;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="WebUI File Browser", meta=(AllowPrivateAccess="true"))
 	FString SelectedFilePath;

@@ -37,14 +37,20 @@ public class WebUIRuntime : ModuleRules
 			}
 		);
 
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicSystemLibraries.AddRange(
+				new string[] { "ole32.lib", "shell32.lib", "uuid.lib" }
+			);
+		}
+
 		if (Target.bBuildEditor)
 		{
 			PrivateDependencyModuleNames.AddRange(
 				new string[]
 				{
 					"UnrealEd",
-					"BlueprintGraph",
-					"DesktopPlatform"
+					"BlueprintGraph"
 				}
 			);
 		}
