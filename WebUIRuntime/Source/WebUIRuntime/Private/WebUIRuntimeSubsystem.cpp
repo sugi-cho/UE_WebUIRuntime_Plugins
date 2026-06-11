@@ -43,6 +43,7 @@
 #include "WebUIImageComponent.h"
 #include "WebUIRuntimeSaveGame.h"
 #include "WebUIRuntimeSettings.h"
+#include "WebUIPresentationTypes.h"
 #include "WebUIRuntime.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWebUIMobileController, Log, All);
@@ -99,6 +100,21 @@ namespace
 		(void)Key;
 		return FString();
 #endif
+	}
+
+	FString GetPresentationTextString(const FText& Text)
+	{
+		return Text.IsEmptyOrWhitespace() ? FString() : Text.ToString();
+	}
+
+	double GetDefaultWebUIStep(FProperty* Property, double MinValue, double MaxValue)
+	{
+		if (Property && Property->IsA<FIntProperty>())
+		{
+			return 1.0;
+		}
+
+		return FMath::Max((MaxValue - MinValue) / 100.0, 0.001);
 	}
 
 	FString StripWebUIOrderPrefix(const FString& RawLabel);
@@ -2594,6 +2610,28 @@ async function load(){
 		if (Delta.IsSet()) PropertyObject->SetNumberField(TEXT("step"), Delta.GetValue());
 	}
 
+	void ApplyButtonPresentationToJson(const TMap<FName, FWebUIButtonPresentation>& Presentations, const FString& ButtonId, const TSharedRef<FJsonObject>& ButtonObject)
+	{
+		const FWebUIButtonPresentation* Presentation = Presentations.Find(FName(*ButtonId));
+		if (!Presentation)
+		{
+			return;
+		}
+
+		const FString DisplayName = GetPresentationTextString(Presentation->DisplayName);
+		if (!DisplayName.IsEmpty())
+		{
+			ButtonObject->SetStringField(TEXT("label"), DisplayName);
+		}
+
+		const FString Description = GetPresentationTextString(Presentation->Description);
+		if (!Description.IsEmpty())
+		{
+			ButtonObject->SetStringField(TEXT("description"), Description);
+			ButtonObject->SetStringField(TEXT("tooltip"), Description);
+		}
+	}
+
 	TSharedRef<FJsonObject> MakeButtonObject(const FString& Id, const FString& Label, const FString& Kind, bool bEnabled = true)
 	{
 		TSharedRef<FJsonObject> ButtonObject = MakeShared<FJsonObject>();
@@ -3639,7 +3677,9 @@ TSharedRef<FJsonObject> UWebUIRuntimeSubsystem::BuildSchema() const
 		for (const FName Button : Host->GetWebUIButtons())
 		{
 			const FString ButtonName = Button.ToString();
-			HostButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ButtonName, StripWebUIOrderPrefix(ButtonName), TEXT("registered"), Host->IsWebUIButtonEnabled(Button))));
+			TSharedRef<FJsonObject> ButtonObject = MakeButtonObject(ButtonName, StripWebUIOrderPrefix(ButtonName), TEXT("registered"), Host->IsWebUIButtonEnabled(Button));
+			ApplyButtonPresentationToJson(Host->ButtonPresentations, ButtonName, ButtonObject);
+			HostButtonValues.Add(MakeShared<FJsonValueObject>(ButtonObject));
 		}
 		SortWebUIJsonObjectsByField(HostButtonValues, TEXT("id"));
 		HostObject->SetArrayField(TEXT("hostButtons"), HostButtonValues);
@@ -3726,6 +3766,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor, 
 			AddStringOptionFields(Actor, Property, PropertyObject);
 			AddStringActionFields(Actor, Property, PropertyObject);
 		}
+		ApplyPropertyPresentationToJson(Actor, Host, Property, PropertyObject);
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 	SortWebUIJsonObjectsByField(PropertyValues, TEXT("label"));
@@ -3738,6 +3779,20 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildActorSchema(AActor* Actor, 
 			{
 				return Host ? Host->IsWebUIButtonEnabled(ButtonId) : true;
 			});
+		if (Host)
+		{
+			for (TSharedPtr<FJsonValue>& ButtonValue : ButtonValues)
+			{
+				if (ButtonValue.IsValid())
+				{
+					const TSharedPtr<FJsonObject> ButtonObject = ButtonValue->AsObject();
+					if (ButtonObject.IsValid())
+					{
+						ApplyButtonPresentationToJson(Host->ButtonPresentations, ButtonObject->GetStringField(TEXT("id")), ButtonObject.ToSharedRef());
+					}
+				}
+			}
+		}
 		SortWebUIJsonObjectsByField(ButtonValues, TEXT("id"));
 
 	TSharedRef<FJsonObject> ActorObject = MakeShared<FJsonObject>();
@@ -3780,6 +3835,7 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 			AddStringOptionFields(Component, Property, PropertyObject);
 			AddStringActionFields(Component, Property, PropertyObject);
 		}
+		ApplyPropertyPresentationToJson(Component, nullptr, Property, PropertyObject);
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
 	}
 	SortWebUIJsonObjectsByField(PropertyValues, TEXT("label"));
@@ -3793,12 +3849,28 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 			{
 				return WebUIComponent ? WebUIComponent->IsWebUIButtonEnabled(ButtonId) : true;
 			});
+		if (WebUIComponent)
+		{
+			for (TSharedPtr<FJsonValue>& ButtonValue : ButtonValues)
+			{
+				if (ButtonValue.IsValid())
+				{
+					const TSharedPtr<FJsonObject> ButtonObject = ButtonValue->AsObject();
+					if (ButtonObject.IsValid())
+					{
+						ApplyButtonPresentationToJson(WebUIComponent->ButtonPresentations, ButtonObject->GetStringField(TEXT("id")), ButtonObject.ToSharedRef());
+					}
+				}
+			}
+		}
 		if (const UWebUIComponentBase* WebUIComponentBase = Cast<UWebUIComponentBase>(Component))
 		{
 			for (const FName Button : WebUIComponentBase->GetWebUIButtons())
 			{
 				const FString ButtonName = Button.ToString();
-				ButtonValues.Add(MakeShared<FJsonValueObject>(MakeButtonObject(ButtonName, StripWebUIOrderPrefix(ButtonName), TEXT("registered"), WebUIComponentBase->IsWebUIButtonEnabled(Button))));
+				TSharedRef<FJsonObject> ButtonObject = MakeButtonObject(ButtonName, StripWebUIOrderPrefix(ButtonName), TEXT("registered"), WebUIComponentBase->IsWebUIButtonEnabled(Button));
+				ApplyButtonPresentationToJson(WebUIComponentBase->ButtonPresentations, ButtonName, ButtonObject);
+				ButtonValues.Add(MakeShared<FJsonValueObject>(ButtonObject));
 			}
 		}
 	SortWebUIJsonObjectsByField(ButtonValues, TEXT("id"));
@@ -4015,17 +4087,39 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 	}
 	else if (FIntProperty* IntProperty = CastField<FIntProperty>(Property))
 	{
-		IntProperty->SetPropertyValue(PropertyPtr, static_cast<int32>(Value->AsNumber()));
+		double Number = Value->AsNumber();
+		double MinValue = 0.0;
+		double MaxValue = 0.0;
+		double StepValue = 0.0;
+		if (TryGetNumericPresentationRange(Owner, Host, Property, MinValue, MaxValue, StepValue))
+		{
+			Number = FMath::Clamp(Number, MinValue, MaxValue);
+		}
+		IntProperty->SetPropertyValue(PropertyPtr, static_cast<int32>(Number));
 	}
 	else if (FFloatProperty* FloatProperty = CastField<FFloatProperty>(Property))
 	{
-		const double Number = Value->AsNumber();
+		double Number = Value->AsNumber();
+		double MinValue = 0.0;
+		double MaxValue = 0.0;
+		double StepValue = 0.0;
+		if (TryGetNumericPresentationRange(Owner, Host, Property, MinValue, MaxValue, StepValue))
+		{
+			Number = FMath::Clamp(Number, MinValue, MaxValue);
+		}
 		FloatProperty->SetPropertyValue(PropertyPtr, static_cast<float>(Number));
 		NotifyFloatChanged(*PropertyName, Number);
 	}
 	else if (FDoubleProperty* DoubleProperty = CastField<FDoubleProperty>(Property))
 	{
-		const double Number = Value->AsNumber();
+		double Number = Value->AsNumber();
+		double MinValue = 0.0;
+		double MaxValue = 0.0;
+		double StepValue = 0.0;
+		if (TryGetNumericPresentationRange(Owner, Host, Property, MinValue, MaxValue, StepValue))
+		{
+			Number = FMath::Clamp(Number, MinValue, MaxValue);
+		}
 		DoubleProperty->SetPropertyValue(PropertyPtr, Number);
 		NotifyFloatChanged(*PropertyName, Number);
 	}
@@ -4248,6 +4342,128 @@ TSharedPtr<FJsonValue> UWebUIRuntimeSubsystem::PropertyToJsonValue(FProperty* Pr
 		}
 	}
 	return MakeShared<FJsonValueNull>();
+}
+
+const FWebUIPropertyPresentation* UWebUIRuntimeSubsystem::FindPropertyPresentation(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property) const
+{
+	if (!Owner || !Property)
+	{
+		return nullptr;
+	}
+
+	const FName PropertyName = Property->GetFName();
+	if (const UWebUIComponentBase* WebUIComponent = Cast<UWebUIComponentBase>(Owner))
+	{
+		if (const FWebUIPropertyPresentation* Presentation = WebUIComponent->PropertyPresentations.Find(PropertyName))
+		{
+			return Presentation;
+		}
+	}
+
+	if (Host && Owner == Host->GetOwner())
+	{
+		if (const FWebUIPropertyPresentation* Presentation = Host->ActorPropertyPresentations.Find(PropertyName))
+		{
+			return Presentation;
+		}
+	}
+
+	return nullptr;
+}
+
+void UWebUIRuntimeSubsystem::ApplyPropertyPresentationToJson(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property, const TSharedPtr<FJsonObject>& PropertyObject) const
+{
+	if (!Property || !PropertyObject.IsValid())
+	{
+		return;
+	}
+
+	const FWebUIPropertyPresentation* Presentation = FindPropertyPresentation(Owner, Host, Property);
+	FString DisplayName;
+	FString Description;
+	double MinValue = 0.0;
+	double MaxValue = 0.0;
+	double StepValue = 0.0;
+	bool bHasSlider = false;
+
+	if (Presentation)
+	{
+		DisplayName = GetPresentationTextString(Presentation->DisplayName);
+		Description = GetPresentationTextString(Presentation->Description);
+		bHasSlider = TryGetNumericPresentationRange(Owner, Host, Property, MinValue, MaxValue, StepValue);
+	}
+	else
+	{
+		DisplayName = GetFieldMetaData(Property, TEXT("DisplayName"));
+		Description = GetFieldMetaData(Property, TEXT("ToolTip"));
+
+		if (Property->IsA<FNumericProperty>())
+		{
+			double MetadataMin = 0.0;
+			double MetadataMax = 0.0;
+			const bool bHasMin = ReadMetaNumber(Property, TEXT("UIMin")).IsSet() || ReadMetaNumber(Property, TEXT("ClampMin")).IsSet();
+			const bool bHasMax = ReadMetaNumber(Property, TEXT("UIMax")).IsSet() || ReadMetaNumber(Property, TEXT("ClampMax")).IsSet();
+			const TOptional<double> UIMin = ReadMetaNumber(Property, TEXT("UIMin"));
+			const TOptional<double> UIMax = ReadMetaNumber(Property, TEXT("UIMax"));
+			const TOptional<double> ClampMin = ReadMetaNumber(Property, TEXT("ClampMin"));
+			const TOptional<double> ClampMax = ReadMetaNumber(Property, TEXT("ClampMax"));
+			if (UIMin.IsSet()) MetadataMin = UIMin.GetValue();
+			else if (ClampMin.IsSet()) MetadataMin = ClampMin.GetValue();
+			if (UIMax.IsSet()) MetadataMax = UIMax.GetValue();
+			else if (ClampMax.IsSet()) MetadataMax = ClampMax.GetValue();
+			if (bHasMin && bHasMax && MetadataMin < MetadataMax)
+			{
+				MinValue = MetadataMin;
+				MaxValue = MetadataMax;
+				StepValue = Property->IsA<FIntProperty>() ? 1.0 : GetDefaultWebUIStep(Property, MinValue, MaxValue);
+				bHasSlider = true;
+			}
+		}
+	}
+
+	if (!DisplayName.IsEmpty())
+	{
+		PropertyObject->SetStringField(TEXT("label"), DisplayName);
+	}
+
+	if (!Description.IsEmpty())
+	{
+		PropertyObject->SetStringField(TEXT("description"), Description);
+		PropertyObject->SetStringField(TEXT("tooltip"), Description);
+	}
+
+	if (bHasSlider)
+	{
+		PropertyObject->SetBoolField(TEXT("slider"), true);
+		PropertyObject->SetNumberField(TEXT("min"), MinValue);
+		PropertyObject->SetNumberField(TEXT("max"), MaxValue);
+		PropertyObject->SetNumberField(TEXT("uiMin"), MinValue);
+		PropertyObject->SetNumberField(TEXT("uiMax"), MaxValue);
+		PropertyObject->SetNumberField(TEXT("sliderMin"), MinValue);
+		PropertyObject->SetNumberField(TEXT("sliderMax"), MaxValue);
+		PropertyObject->SetNumberField(TEXT("clampMin"), MinValue);
+		PropertyObject->SetNumberField(TEXT("clampMax"), MaxValue);
+		PropertyObject->SetNumberField(TEXT("step"), StepValue);
+	}
+}
+
+bool UWebUIRuntimeSubsystem::TryGetNumericPresentationRange(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property, double& OutMin, double& OutMax, double& OutStep) const
+{
+	if (!Property || !Property->IsA<FNumericProperty>())
+	{
+		return false;
+	}
+
+	const FWebUIPropertyPresentation* Presentation = FindPropertyPresentation(Owner, Host, Property);
+	if (!Presentation || !Presentation->bUseSlider || Presentation->Min >= Presentation->Max)
+	{
+		return false;
+	}
+
+	OutMin = Presentation->Min;
+	OutMax = Presentation->Max;
+	OutStep = Presentation->Step > 0.0 ? Presentation->Step : GetDefaultWebUIStep(Property, OutMin, OutMax);
+	return true;
 }
 
 FString UWebUIRuntimeSubsystem::GetPropertyWebUIType(FProperty* Property) const

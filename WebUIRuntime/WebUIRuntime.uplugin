@@ -23,6 +23,11 @@
 			"Name": "WebUIRuntime",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "WebUIRuntimeEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	]
 }

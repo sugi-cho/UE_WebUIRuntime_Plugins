@@ -4,6 +4,7 @@
 #include "Containers/Ticker.h"
 #include "HttpRouteHandle.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "WebUIPresentationTypes.h"
 #include "WebUIRuntimeSubsystem.generated.h"
 
 class FJsonObject;
@@ -94,6 +95,9 @@ private:
 	bool SetPropertyFromJson(UObject* Owner, UWebUIHostComponent* Host, const FString& PropertyName, const TSharedPtr<FJsonValue>& Value, FString& OutError, bool bPersistAfterChange = true);
 	TSharedPtr<FJsonValue> PropertyToJsonValue(FProperty* Property, const void* Container) const;
 	FString GetPropertyWebUIType(FProperty* Property) const;
+	const FWebUIPropertyPresentation* FindPropertyPresentation(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property) const;
+	void ApplyPropertyPresentationToJson(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property, const TSharedPtr<FJsonObject>& PropertyObject) const;
+	bool TryGetNumericPresentationRange(const UObject* Owner, const UWebUIHostComponent* Host, FProperty* Property, double& OutMin, double& OutMax, double& OutStep) const;
 	bool IsWebUIProperty(FProperty* Property) const;
 	void ApplyHttpServerBindAddressSetting() const;
 	bool SerializeJsonValue(const TSharedPtr<FJsonValue>& Value, FString& OutJson) const;

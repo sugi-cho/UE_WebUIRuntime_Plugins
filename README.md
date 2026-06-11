@@ -108,6 +108,7 @@ WebUI に出すボタンやパラメータは、名前の先頭に `00_` のよ�
 4. 表示名はプレフィックスを除いた部分になります。
 5. 対応型の値だけが WebUI に出ます。
 6. 数値型は `UIMin/UIMax` や `ClampMin/ClampMax` があればスライダーとして表示されます。
+   Editor では `Sync WebUI Presentation For Blueprint` で保存済み presentation に同期できます。Packaged build では保存済み data を使います。
 7. `enum` は選択肢のドロップダウン、`Vector` / `Rotator` は成分ごとの数値入力です。
 8. `Color` はカラーピッカー、`LinearColor` はカラーピッカー＋RGBA 数値入力で表示されます。
 
@@ -252,3 +253,5 @@ URL 例:
 - Shipping ビルドや各プラットフォームでの WebBrowserWidget の挙動は、別途検証が必要です。
 - `Allow Remote Access` を有効にすると、LAN 内の端末から操作 API にアクセスできます。運用環境ではアクセス制御に注意してください。
 - この変更では `WebUI_NDI` の既存挙動は変更していません。
+- `WebUIRuntimeEditor` の `Sync WebUI Presentation For Blueprint` で、Blueprint や C++ `UPROPERTY` の `DisplayName` / `ToolTip` / `UIMin` / `UIMax` / `ClampMin` / `ClampMax` を保存済み presentation に同期できます。
+- エディタ上部ツールバーの `WebUI Sync All` で、プロジェクト内の Blueprint をまとめて同期できます。

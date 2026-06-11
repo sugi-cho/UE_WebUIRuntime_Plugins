@@ -2,6 +2,7 @@
 
 #include "Components/ActorComponent.h"
 #include "CoreMinimal.h"
+#include "WebUIPresentationTypes.h"
 #include "WebUIComponentBase.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIButtonClicked, FName, ButtonId);
@@ -39,6 +40,12 @@ public:
 	void SetWebUIDisplayName(const FString& InDisplayName);
 
 	const TArray<FName>& GetWebUIButtons() const;
+
+	UPROPERTY(EditAnywhere, Category="WebUI")
+	TMap<FName, FWebUIPropertyPresentation> PropertyPresentations;
+
+	UPROPERTY(EditAnywhere, Category="WebUI")
+	TMap<FName, FWebUIButtonPresentation> ButtonPresentations;
 
 	void NotifyWebUIPropertyChanged(FName PropertyName);
 	void NotifyWebUIBoolChanged(FName PropertyName, bool Value);

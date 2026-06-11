@@ -2,6 +2,7 @@
 
 #include "Components/ActorComponent.h"
 #include "CoreMinimal.h"
+#include "WebUIPresentationTypes.h"
 #include "WebUIHostComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUIHostPropertyChanged, FName, PropertyName);
@@ -92,6 +93,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="WebUI Host")
 	const TArray<FName>& GetWebUIButtons() const;
+
+	UPROPERTY(EditAnywhere, Category="WebUI Host")
+	TMap<FName, FWebUIPropertyPresentation> ActorPropertyPresentations;
+
+	UPROPERTY(EditAnywhere, Category="WebUI Host")
+	TMap<FName, FWebUIButtonPresentation> ButtonPresentations;
 
 	void NotifyWebUIPropertyChanged(FName PropertyName);
 	void NotifyWebUIBoolChanged(FName PropertyName, bool Value);
