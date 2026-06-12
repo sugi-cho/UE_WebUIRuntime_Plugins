@@ -7,8 +7,10 @@
 class UNDIMediaReceiver;
 class UNDIMediaTexture2D;
 struct FNDIConnectionInformation;
+struct NDIlib_video_frame_v2_t;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnWebUINDISourceSelected, const FString&, SourceName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnWebUINDIVideoFrameReceived, const FString&, SourceName, UNDIMediaTexture2D*, VideoTexture);
 
 UCLASS(BlueprintType, Blueprintable, ClassGroup=(WebUI), meta=(BlueprintSpawnableComponent))
 class WEBUI_NDI_API UWebUINDIComponent : public UWebUIComponentBase
@@ -44,7 +46,10 @@ public:
 	UFUNCTION(BlueprintImplementableEvent, Category="WebUI|NDI", DisplayName="OnWebUINDISourceSelected")
 	void K2_OnWebUINDISourceSelected(const FString& SourceName);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI", meta=(WebUI, WebUIOptions="GetAvailableNDISourceOptions", WebUIOnChanged="SelectNDISource", WebUIActions="RefreshNDISources"))
+	UFUNCTION(BlueprintImplementableEvent, Category="WebUI|NDI", DisplayName="OnWebUINDIVideoFrameReceived")
+	void K2_OnWebUINDIVideoFrameReceived(const FString& SourceName, UNDIMediaTexture2D* VideoTexture);
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="WebUI", meta=(WebUI, WebUIOptions="GetAvailableNDISourceOptions", WebUIOnChanged="SelectNDISource"))
 	FString SelectedNDISource;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="NDI")
@@ -56,6 +61,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="WebUI|NDI", meta=(DisplayName="On WebUI NDI Source Selected"))
 	FOnWebUINDISourceSelected OnWebUINDISourceSelected;
 
+	UPROPERTY(BlueprintAssignable, Category="WebUI|NDI", meta=(DisplayName="On WebUI NDI Video Frame Received"))
+	FOnWebUINDIVideoFrameReceived OnWebUINDIVideoFrameReceived;
+
 protected:
 	virtual void HandleWebUIButtonClicked(FName ButtonId) override;
 
@@ -64,8 +72,17 @@ private:
 	TArray<FString> AvailableNDISources;
 
 	bool EnsureTargetNDIResources();
+	bool EnsureTargetNDIVideoTexture();
+	void BindTargetNDIEvents();
+	void UnbindTargetNDIEvents();
 	void ReleaseTargetNDIResources();
 	void SyncWebUIButtonList();
+
+	void HandleTargetNDIVideoCaptured(UNDIMediaReceiver* Receiver, const NDIlib_video_frame_v2_t& VideoFrame);
+
+	FDelegateHandle TargetNDIVideoCaptureEventHandle;
+	UPROPERTY(Transient)
+	TObjectPtr<UNDIMediaTexture2D> TargetNDIMediaTexture = nullptr;
 
 	bool bOwnsTargetNDIResources = false;
 };

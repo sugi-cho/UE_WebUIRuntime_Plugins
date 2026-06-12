@@ -55,6 +55,7 @@ public:
 	void NotifyWebUIRotatorChanged(FName PropertyName, FRotator Value);
 	void NotifyWebUIColorChanged(FName PropertyName, FLinearColor Value);
 	void NotifyWebUIButtonClicked(FName ButtonId);
+	void NotifyWebUIStateChanged();
 
 protected:
 	virtual void HandleWebUIButtonClicked(FName ButtonId);

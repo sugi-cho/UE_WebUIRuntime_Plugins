@@ -1,5 +1,6 @@
 #include "WebUINDIComponent.h"
 
+#include "Async/Async.h"
 #include "Services/NDIFinderService.h"
 #include "Objects/Media/NDIMediaReceiver.h"
 #include "Objects/Media/NDIMediaTexture2D.h"
@@ -13,6 +14,7 @@ void UWebUINDIComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	EnsureTargetNDIResources();
+	BindTargetNDIEvents();
 	RefreshNDISources();
 	ApplySelectedNDISource();
 }
@@ -38,12 +40,14 @@ void UWebUINDIComponent::RefreshNDISources()
 	}
 
 	SyncWebUIButtonList();
+	NotifyWebUIStateChanged();
 }
 
 void UWebUINDIComponent::SetAvailableNDISources(const TArray<FString>& Sources)
 {
 	AvailableNDISources = Sources;
 	SyncWebUIButtonList();
+	NotifyWebUIStateChanged();
 }
 
 const TArray<FString>& UWebUINDIComponent::GetAvailableNDISources() const
@@ -59,10 +63,12 @@ void UWebUINDIComponent::GetAvailableNDISourceOptions(TArray<FString>& OutSource
 void UWebUINDIComponent::SelectNDISource(const FString& SourceName)
 {
 	SelectedNDISource = SourceName;
-	if (ApplySelectedNDISource())
+	const bool bApplied = ApplySelectedNDISource();
+	OnWebUINDISourceSelected.Broadcast(SourceName);
+	K2_OnWebUINDISourceSelected(SourceName);
+	if (!bApplied)
 	{
-		OnWebUINDISourceSelected.Broadcast(SourceName);
-		K2_OnWebUINDISourceSelected(SourceName);
+		UE_LOG(LogTemp, Warning, TEXT("WebUINDI: selection broadcasted before NDI connection was fully applied: %s"), *SourceName);
 	}
 }
 
@@ -93,24 +99,28 @@ bool UWebUINDIComponent::ApplySelectedNDISource()
 	}
 
 	TargetNDIMediaReceiver->ConnectionSetting = ConnectionInformation;
+	TargetNDIMediaReceiver->Shutdown();
+	EnsureTargetNDIVideoTexture();
+	BindTargetNDIEvents();
 
-	const FNDIConnectionInformation CurrentConnection = TargetNDIMediaReceiver->GetCurrentConnectionInformation();
-	if (CurrentConnection.IsValid())
+	if (!TargetNDIMediaReceiver->Initialize(ConnectionInformation, UNDIMediaReceiver::EUsage::Standalone))
 	{
 		TargetNDIMediaReceiver->ChangeConnection(ConnectionInformation);
+		TargetNDIMediaReceiver->StartConnection();
 	}
-	else
-	{
-		TargetNDIMediaReceiver->Initialize(ConnectionInformation, UNDIMediaReceiver::EUsage::Standalone);
-	}
+
+	TargetNDIMediaReceiver->CaptureConnectedVideo();
 
 	return true;
 }
 
 void UWebUINDIComponent::SetTargetNDIMediaReceiver(UNDIMediaReceiver* InTargetNDIMediaReceiver)
 {
+	UnbindTargetNDIEvents();
 	bOwnsTargetNDIResources = false;
 	TargetNDIMediaReceiver = InTargetNDIMediaReceiver;
+	EnsureTargetNDIVideoTexture();
+	BindTargetNDIEvents();
 	ApplySelectedNDISource();
 }
 
@@ -118,7 +128,7 @@ bool UWebUINDIComponent::EnsureTargetNDIResources()
 {
 	if (IsValid(TargetNDIMediaReceiver))
 	{
-		return true;
+		return EnsureTargetNDIVideoTexture();
 	}
 
 	TargetNDIMediaReceiver = NewObject<UNDIMediaReceiver>(this, UNDIMediaReceiver::StaticClass(), NAME_None, RF_Transient);
@@ -127,7 +137,34 @@ bool UWebUINDIComponent::EnsureTargetNDIResources()
 		return false;
 	}
 
-	UNDIMediaTexture2D* TargetNDIMediaTexture = NewObject<UNDIMediaTexture2D>(
+	UNDIMediaTexture2D* NewTargetNDIMediaTexture = NewObject<UNDIMediaTexture2D>(
+		TargetNDIMediaReceiver, UNDIMediaTexture2D::StaticClass(), NAME_None, RF_Transient);
+	if (!IsValid(NewTargetNDIMediaTexture))
+	{
+		return false;
+	}
+
+	NewTargetNDIMediaTexture->UpdateResource();
+	TargetNDIMediaReceiver->ChangeVideoTexture(NewTargetNDIMediaTexture);
+	this->TargetNDIMediaTexture = NewTargetNDIMediaTexture;
+	bOwnsTargetNDIResources = true;
+	BindTargetNDIEvents();
+	return true;
+}
+
+bool UWebUINDIComponent::EnsureTargetNDIVideoTexture()
+{
+	if (!IsValid(TargetNDIMediaReceiver))
+	{
+		return false;
+	}
+
+	if (IsValid(TargetNDIMediaTexture))
+	{
+		return true;
+	}
+
+	TargetNDIMediaTexture = NewObject<UNDIMediaTexture2D>(
 		TargetNDIMediaReceiver, UNDIMediaTexture2D::StaticClass(), NAME_None, RF_Transient);
 	if (!IsValid(TargetNDIMediaTexture))
 	{
@@ -136,12 +173,36 @@ bool UWebUINDIComponent::EnsureTargetNDIResources()
 
 	TargetNDIMediaTexture->UpdateResource();
 	TargetNDIMediaReceiver->ChangeVideoTexture(TargetNDIMediaTexture);
-	bOwnsTargetNDIResources = true;
 	return true;
+}
+
+void UWebUINDIComponent::BindTargetNDIEvents()
+{
+	if (IsValid(TargetNDIMediaReceiver))
+	{
+		if (TargetNDIVideoCaptureEventHandle.IsValid())
+		{
+			TargetNDIMediaReceiver->OnNDIReceiverVideoCaptureEvent.Remove(TargetNDIVideoCaptureEventHandle);
+			TargetNDIVideoCaptureEventHandle.Reset();
+		}
+
+		TargetNDIVideoCaptureEventHandle = TargetNDIMediaReceiver->OnNDIReceiverVideoCaptureEvent.AddUObject(
+			this, &UWebUINDIComponent::HandleTargetNDIVideoCaptured);
+	}
+}
+
+void UWebUINDIComponent::UnbindTargetNDIEvents()
+{
+	if (IsValid(TargetNDIMediaReceiver) && TargetNDIVideoCaptureEventHandle.IsValid())
+	{
+		TargetNDIMediaReceiver->OnNDIReceiverVideoCaptureEvent.Remove(TargetNDIVideoCaptureEventHandle);
+		TargetNDIVideoCaptureEventHandle.Reset();
+	}
 }
 
 void UWebUINDIComponent::ReleaseTargetNDIResources()
 {
+	UnbindTargetNDIEvents();
 	if (IsValid(TargetNDIMediaReceiver) && bOwnsTargetNDIResources)
 	{
 		TargetNDIMediaReceiver->ChangeVideoTexture(nullptr);
@@ -149,13 +210,14 @@ void UWebUINDIComponent::ReleaseTargetNDIResources()
 	}
 
 	TargetNDIMediaReceiver = nullptr;
+	TargetNDIMediaTexture = nullptr;
 	bOwnsTargetNDIResources = false;
 }
 
 void UWebUINDIComponent::HandleWebUIButtonClicked(FName ButtonId)
 {
 	const FString ButtonName = ButtonId.ToString();
-	if (ButtonName == TEXT("RefreshNDISources"))
+	if (ButtonName == TEXT("00_Refresh") || ButtonName == TEXT("Refresh") || ButtonName == TEXT("RefreshNDISources"))
 	{
 		RefreshNDISources();
 		return;
@@ -167,7 +229,41 @@ void UWebUINDIComponent::HandleWebUIButtonClicked(FName ButtonId)
 	}
 }
 
+void UWebUINDIComponent::HandleTargetNDIVideoCaptured(UNDIMediaReceiver* Receiver, const NDIlib_video_frame_v2_t& VideoFrame)
+{
+	if (!VideoFrame.p_data)
+	{
+		return;
+	}
+
+	if (!IsValid(Receiver) || Receiver != TargetNDIMediaReceiver)
+	{
+		return;
+	}
+
+	if (!IsValid(TargetNDIMediaTexture))
+	{
+		return;
+	}
+
+	const FNDIConnectionInformation& ConnectionInfo = Receiver->GetCurrentConnectionInformation();
+	const FString SourceName = !ConnectionInfo.GetNDIName().IsEmpty() ? ConnectionInfo.GetNDIName() : SelectedNDISource;
+	TWeakObjectPtr<UWebUINDIComponent> WeakThis(this);
+	TWeakObjectPtr<UNDIMediaTexture2D> WeakTexture(TargetNDIMediaTexture);
+	AsyncTask(ENamedThreads::GameThread, [WeakThis, SourceName, WeakTexture]()
+	{
+		if (!WeakThis.IsValid() || !WeakTexture.IsValid())
+		{
+			return;
+		}
+
+		WeakThis->OnWebUINDIVideoFrameReceived.Broadcast(SourceName, WeakTexture.Get());
+		WeakThis->K2_OnWebUINDIVideoFrameReceived(SourceName, WeakTexture.Get());
+	});
+}
+
 void UWebUINDIComponent::SyncWebUIButtonList()
 {
 	ClearWebUIButtons();
+	RegisterWebUIButton(TEXT("00_Refresh"));
 }

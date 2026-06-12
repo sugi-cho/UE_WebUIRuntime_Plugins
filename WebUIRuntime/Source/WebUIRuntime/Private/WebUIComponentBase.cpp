@@ -277,6 +277,17 @@ void UWebUIComponentBase::NotifyWebUIButtonClicked(FName ButtonId)
 	K2_OnWebUIButtonClicked(ButtonId);
 }
 
+void UWebUIComponentBase::NotifyWebUIStateChanged()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UWebUIRuntimeSubsystem* Runtime = World->GetSubsystem<UWebUIRuntimeSubsystem>())
+		{
+			Runtime->NotifyWebUIComponentStateChanged(this);
+		}
+	}
+}
+
 void UWebUIComponentBase::HandleWebUIButtonClicked(FName ButtonId)
 {
 }

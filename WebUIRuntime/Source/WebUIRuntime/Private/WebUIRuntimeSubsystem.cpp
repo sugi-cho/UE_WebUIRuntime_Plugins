@@ -80,6 +80,25 @@ namespace
 #endif
 	}
 
+	FString GetWebUIOnChangedFunctionName(const UObject* Owner, const FProperty* Property)
+	{
+		FString FunctionName = GetFieldMetaData(Property, TEXT("WebUIOnChanged"));
+		if (!FunctionName.IsEmpty())
+		{
+			return FunctionName;
+		}
+
+		if (Property
+			&& Property->GetOwnerClass()
+			&& Property->GetOwnerClass()->GetName().Equals(TEXT("WebUINDIComponent"), ESearchCase::IgnoreCase)
+			&& Property->GetName().Equals(TEXT("SelectedNDISource"), ESearchCase::IgnoreCase))
+		{
+			return TEXT("SelectNDISource");
+		}
+
+		return FString();
+	}
+
 	bool HasFunctionMetaData(const UFunction* Function, const TCHAR* Key)
 	{
 #if WITH_METADATA
@@ -2923,6 +2942,102 @@ async function load(){
 		Function->DestroyStruct(Params.GetData());
 	}
 
+	void AddStringOptionFieldsFromFunction(UObject* Owner, const FProperty* Property, const TCHAR* OptionsFunctionName, TSharedRef<FJsonObject> PropertyObject)
+	{
+		if (!IsValid(Owner) || !OptionsFunctionName || *OptionsFunctionName == TEXT('\0'))
+		{
+			return;
+		}
+
+		UFunction* Function = Owner->FindFunction(FName(OptionsFunctionName));
+		if (!Function)
+		{
+			return;
+		}
+
+		FArrayProperty* ArrayProperty = nullptr;
+		for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+		{
+			FProperty* ParameterProperty = *It;
+			if (ParameterProperty->HasAnyPropertyFlags(CPF_ReturnParm))
+			{
+				continue;
+			}
+			ArrayProperty = CastField<FArrayProperty>(ParameterProperty);
+			break;
+		}
+
+		FStrProperty* InnerStringProperty = ArrayProperty ? CastField<FStrProperty>(ArrayProperty->Inner) : nullptr;
+		if (!ArrayProperty || !InnerStringProperty)
+		{
+			return;
+		}
+
+		TArray<uint8> Params;
+		Params.SetNumZeroed(Function->ParmsSize);
+		Function->InitializeStruct(Params.GetData());
+		Owner->ProcessEvent(Function, Params.GetData());
+
+		void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Params.GetData());
+		FScriptArrayHelper ArrayHelper(ArrayProperty, ArrayPtr);
+		if (ArrayHelper.Num() <= 0)
+		{
+			Function->DestroyStruct(Params.GetData());
+			return;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Options;
+		Options.Reserve(ArrayHelper.Num());
+		for (int32 Index = 0; Index < ArrayHelper.Num(); ++Index)
+		{
+			const FString OptionValue = InnerStringProperty->GetPropertyValue(ArrayHelper.GetRawPtr(Index));
+			Options.Add(MakeShared<FJsonValueObject>(MakeOptionObject(OptionValue, OptionValue)));
+		}
+
+		if (!Options.IsEmpty())
+		{
+			PropertyObject->SetArrayField(TEXT("options"), Options);
+		}
+
+		Function->DestroyStruct(Params.GetData());
+	}
+
+	void AddStringOptionFieldsFromArrayProperty(UObject* Owner, const TCHAR* ArrayPropertyName, TSharedRef<FJsonObject> PropertyObject)
+	{
+		if (!IsValid(Owner) || !ArrayPropertyName || *ArrayPropertyName == TEXT('\0'))
+		{
+			return;
+		}
+
+		const FProperty* RawProperty = Owner->GetClass()->FindPropertyByName(FName(ArrayPropertyName));
+		const FArrayProperty* ArrayProperty = CastField<FArrayProperty>(RawProperty);
+		const FStrProperty* InnerStringProperty = ArrayProperty ? CastField<FStrProperty>(ArrayProperty->Inner) : nullptr;
+		if (!ArrayProperty || !InnerStringProperty)
+		{
+			return;
+		}
+
+		void* ArrayPtr = ArrayProperty->ContainerPtrToValuePtr<void>(Owner);
+		FScriptArrayHelper ArrayHelper(ArrayProperty, ArrayPtr);
+		if (ArrayHelper.Num() <= 0)
+		{
+			return;
+		}
+
+		TArray<TSharedPtr<FJsonValue>> Options;
+		Options.Reserve(ArrayHelper.Num());
+		for (int32 Index = 0; Index < ArrayHelper.Num(); ++Index)
+		{
+			const FString OptionValue = InnerStringProperty->GetPropertyValue(ArrayHelper.GetRawPtr(Index));
+			Options.Add(MakeShared<FJsonValueObject>(MakeOptionObject(OptionValue, OptionValue)));
+		}
+
+		if (!Options.IsEmpty())
+		{
+			PropertyObject->SetArrayField(TEXT("options"), Options);
+		}
+	}
+
 	void AddStringActionFields(UObject* Owner, const FProperty* Property, TSharedRef<FJsonObject> PropertyObject)
 	{
 		if (!IsValid(Owner) || !HasFieldMetaData(Property, TEXT("WebUIActions")))
@@ -3834,6 +3949,11 @@ TSharedPtr<FJsonObject> UWebUIRuntimeSubsystem::BuildComponentSchema(UActorCompo
 		{
 			AddStringOptionFields(Component, Property, PropertyObject);
 			AddStringActionFields(Component, Property, PropertyObject);
+			if (!PropertyObject->HasField(TEXT("options"))
+				&& Property->GetName().Equals(TEXT("SelectedNDISource"), ESearchCase::IgnoreCase))
+			{
+				AddStringOptionFieldsFromArrayProperty(Component, TEXT("AvailableNDISources"), PropertyObject);
+			}
 		}
 		ApplyPropertyPresentationToJson(Component, nullptr, Property, PropertyObject);
 		PropertyValues.Add(MakeShared<FJsonValueObject>(PropertyObject));
@@ -4128,7 +4248,7 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 		const FString StringValue = Value->AsString();
 		StringProperty->SetPropertyValue(PropertyPtr, StringValue);
 		NotifyStringChanged(*PropertyName, StringValue);
-		const FString OnChangedFunctionName = GetFieldMetaData(Property, TEXT("WebUIOnChanged"));
+		const FString OnChangedFunctionName = GetWebUIOnChangedFunctionName(Owner, Property);
 		if (!OnChangedFunctionName.IsEmpty())
 		{
 			FString CallbackError;
@@ -4144,7 +4264,7 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 		const FString StringValue = Value->AsString();
 		NameProperty->SetPropertyValue(PropertyPtr, FName(*StringValue));
 		NotifyStringChanged(*PropertyName, StringValue);
-		const FString OnChangedFunctionName = GetFieldMetaData(Property, TEXT("WebUIOnChanged"));
+		const FString OnChangedFunctionName = GetWebUIOnChangedFunctionName(Owner, Property);
 		if (!OnChangedFunctionName.IsEmpty())
 		{
 			FString CallbackError;
@@ -4160,7 +4280,7 @@ bool UWebUIRuntimeSubsystem::SetPropertyFromJson(UObject* Owner, UWebUIHostCompo
 		const FString StringValue = Value->AsString();
 		TextProperty->SetPropertyValue(PropertyPtr, FText::FromString(StringValue));
 		NotifyStringChanged(*PropertyName, StringValue);
-		const FString OnChangedFunctionName = GetFieldMetaData(Property, TEXT("WebUIOnChanged"));
+		const FString OnChangedFunctionName = GetWebUIOnChangedFunctionName(Owner, Property);
 		if (!OnChangedFunctionName.IsEmpty())
 		{
 			FString CallbackError;
