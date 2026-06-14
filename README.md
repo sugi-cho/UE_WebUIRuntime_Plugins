@@ -2,6 +2,12 @@
 
 このリポジトリは Unreal Engine プロジェクト本体ではなく、`Plugins/` 配下の WebUI 関連 Plugin のみを管理します。
 
+## Author
+
+- Author: Hironori Sugino
+- Website: https://sugi.cc
+- Original Repository: https://github.com/sugi-cho/UE_WebUIRuntime_Plugins
+
 ## Plugin 構成
 
 - `WebUIRuntime`
