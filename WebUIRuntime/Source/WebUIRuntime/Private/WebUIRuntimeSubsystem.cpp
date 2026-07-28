@@ -3254,7 +3254,9 @@ void UWebUIRuntimeSubsystem::StopServer()
 	Router.Reset();
 	ActivePort = 0;
 	StopWebSocketServer();
-	FHttpServerModule::Get().StopAllListeners();
+	// FHttpServerModule listeners are shared process-wide; StopAllListeners() here would also
+	// kill listeners owned by other systems (e.g. the Unreal MCP server). Unbinding our routes
+	// above is sufficient — the port listener simply serves no routes afterwards.
 }
 
 bool UWebUIRuntimeSubsystem::IsServerRunning() const
